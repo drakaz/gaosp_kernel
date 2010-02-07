@@ -1,0 +1,528 @@
+/*
+** =========================================================================
+** File:
+**     android_vibe.c
+**
+** Description: 
+**     VibeTonz Kernel Module main entry-point.
+**
+** Portions Copyright (c) 2008 Immersion Corporation. All Rights Reserved. 
+**
+** This file contains Original Code and/or Modifications of Original Code 
+** as defined in and that are subject to the GNU Public License v2 - 
+** (the 'License'). You may not use this file except in compliance with the 
+** License. You should have received a copy of the GNU General Public License 
+** along with this program; if not, write to the Free Software Foundation, Inc.,
+** 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA or contact 
+** VibeTonzSales@immersion.com.
+**
+** The Original Code and all software distributed under the License are 
+** distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER 
+** EXPRESS OR IMPLIED, AND IMMERSION HEREBY DISCLAIMS ALL SUCH WARRANTIES, 
+** INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY, FITNESS 
+** FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT. Please see 
+** the License for the specific language governing rights and limitations 
+** under the License.
+** =========================================================================
+*/
+
+#ifndef __KERNEL__
+#define __KERNEL__
+#endif
+#ifndef MODULE
+#define MODULE
+#endif
+
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/timer.h>
+#include <linux/fs.h>
+#include <linux/version.h>
+#include <linux/miscdevice.h>
+#include <linux/platform_device.h>
+#include <asm/uaccess.h>
+#include <asm/gpio.h>
+
+#include <linux/android_vibe.h>
+#include <linux/mutex.h>
+#include <linux/clk.h>
+#include <asm/arch/vreg.h>
+#ifdef CONFIG_ANDROID_POWER
+#include <linux/android_power.h>
+#endif
+
+#include <linux/delay.h>
+#include <linux/android_timed_gpio.h>
+
+/* Device name and version information */
+#define VERSION_STR " v2.0.92.3\n"                  /* PLEASE DO NOT CHANGE - this is auto-generated */
+#define VERSION_STR_LEN 16                          /* account extra space for future extra digits in version number */
+static char g_szDeviceName[   VIBE_MAX_DEVICE_NAME_LENGTH 
+                            + VERSION_STR_LEN];     /* initialized in init_module */
+static size_t g_cchDeviceName;                      /* initialized in init_module */
+
+/* Flag indicating whether the driver is in use */
+static char g_bIsPlaying = false;
+
+struct clk *android_vib_clk; /* gp_clk */
+
+
+/* For QA purposes */
+#ifdef QA_TEST
+#define FORCE_LOG_BUFFER_SIZE   128
+#define TIME_INCREMENT          5
+static int g_nTime = 0;
+static int g_nForceLogIndex = 0;
+static VibeInt8 g_nForceLog[FORCE_LOG_BUFFER_SIZE];
+#endif
+
+#define GP_CLK_M_DEFAULT			21
+#define GP_CLK_N_DEFAULT			18000
+#define GP_CLK_D_DEFAULT			9000	/* 50% duty cycle */ 
+#define IMM_PWM_MULTIPLIER		    17778	/* Must be integer */
+/* Variable defined to allow for tuning of the handset. */
+//#define VIBETONZ_TUNING /* For temporary section for Tuning Work */
+
+/*
+** Global variables for LRA PWM M,N and D values.
+*/
+VibeInt32 g_nLRA_GP_CLK_M = GP_CLK_M_DEFAULT;
+VibeInt32 g_nLRA_GP_CLK_N = GP_CLK_N_DEFAULT;
+VibeInt32 g_nLRA_GP_CLK_D = GP_CLK_N_DEFAULT;
+VibeInt32 g_nLRA_GP_CLK_PWM_MUL = IMM_PWM_MULTIPLIER;
+
+#if ((LINUX_VERSION_CODE & 0xFFFF00) < KERNEL_VERSION(2,6,0))
+#error Unsupported Kernel version
+#endif
+
+//#define IMPLEMENT_AS_CHAR_DRIVER
+
+#ifdef IMPLEMENT_AS_CHAR_DRIVER
+static int g_nMajor = 0;
+#endif
+
+/* added by gtuo.park */
+struct timed_gpio_data {
+	struct device *dev;
+	struct hrtimer timer;
+	spinlock_t lock;
+	unsigned    gpio;
+	int         max_timeout;
+	u8      active_low;
+};
+struct timed_gpio_data *gpio_data;
+extern struct class *timed_gpio_class;
+
+/* Needs to be included after the global variables because it uses them */
+//#include <VibeOSKernelLinuxTime.c>
+
+/* File IO */
+static int open(struct inode *inode, struct file *file);
+static int release(struct inode *inode, struct file *file);
+static int ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned long arg);
+#ifndef CONFIG_ANDROID_POWER
+static int suspend(struct platform_device *pdev, pm_message_t state);
+static int resume(struct platform_device *pdev);
+#endif
+
+#define TIMER_INCR                      1       /* run timer at 1 jiffie */
+#define WATCHDOG_TIMEOUT                10      /* 10 timer cycles = 50ms */
+
+
+DECLARE_MUTEX(g_hMutex);
+
+/* Variable for setting PWM in Force Out Set */
+VibeInt32 g_nForce_32 = 0;
+
+#ifdef CONFIG_ANDROID_POWER
+static android_early_suspend_t early_suspend;
+#endif
+
+/**
+ * sem_is_locked - is the semaphore locked
+ * @lock: the semaphore to be queried
+ *
+ * Returns 1 if the semaphore is locked, 0 if unlocked.
+ */
+static inline int sem_is_locked(struct semaphore *lock)
+{
+	return atomic_read(&lock->count) != 1;
+}
+
+
+
+/*
+** This function is used to set and re-set the GP_CLK M and N counters
+** to output the desired target frequency.
+**
+*/
+
+static  VibeStatus vibe_set_pwm_freq(VibeInt8 nForce)
+{
+   /* Put the MND counter in reset mode for programming */
+   HWIO_OUTM(GP_NS_REG, HWIO_GP_NS_REG_MNCNTR_EN_BMSK, 0);
+   HWIO_OUTM(GP_NS_REG, HWIO_GP_NS_REG_PRE_DIV_SEL_BMSK, 0 << HWIO_GP_NS_REG_PRE_DIV_SEL_SHFT);	/* P: 0 => Freq/1, 1 => Freq/2, 4 => Freq/4 */
+   HWIO_OUTM(GP_NS_REG, HWIO_GP_NS_REG_SRC_SEL_BMSK, 0 << HWIO_GP_NS_REG_SRC_SEL_SHFT);	/* S : 0 => TXCO(19.2MHz), 1 => Sleep XTAL(32kHz) */
+   HWIO_OUTM(GP_NS_REG, HWIO_GP_NS_REG_MNCNTR_MODE_BMSK, 2 << HWIO_GP_NS_REG_MNCNTR_MODE_SHFT);	/* Dual-edge mode */
+   HWIO_OUTM(GP_MD_REG, HWIO_GP_MD_REG_M_VAL_BMSK, g_nLRA_GP_CLK_M << HWIO_GP_MD_REG_M_VAL_SHFT);
+   g_nForce_32 = ((nForce * g_nLRA_GP_CLK_PWM_MUL) >> 8) + g_nLRA_GP_CLK_D;
+   printk("%s, g_nForce_32 : %d\n",__FUNCTION__,g_nForce_32);
+   HWIO_OUTM(GP_MD_REG, HWIO_GP_MD_REG_D_VAL_BMSK, ( ~((VibeInt16)g_nForce_32 << 1) ) << HWIO_GP_MD_REG_D_VAL_SHFT);
+   HWIO_OUTM(GP_NS_REG, HWIO_GP_NS_REG_GP_N_VAL_BMSK, ~(g_nLRA_GP_CLK_N - g_nLRA_GP_CLK_M) << HWIO_GP_NS_REG_GP_N_VAL_SHFT);
+   HWIO_OUTM(GP_NS_REG, HWIO_GP_NS_REG_MNCNTR_EN_BMSK, 1 << HWIO_GP_NS_REG_MNCNTR_EN_SHFT);			           /* Enable M/N counter */
+   printk("%x, %x, %x\n",( ~((VibeInt16)g_nForce_32 << 1) ) << HWIO_GP_MD_REG_D_VAL_SHFT,~(g_nLRA_GP_CLK_N - g_nLRA_GP_CLK_M) << HWIO_GP_NS_REG_GP_N_VAL_SHFT,1 << HWIO_GP_NS_REG_MNCNTR_EN_SHFT);
+
+	return VIBE_S_SUCCESS;
+}
+
+static void android_vibe_gp_clk_mode(int on)
+{
+    if(on)
+	  gpio_tlmm_config(GPIO_CFG(27, 1, GPIO_OUTPUT, GPIO_PULL_DOWN, GPIO_2MA), GPIO_ENABLE);
+    else
+      gpio_tlmm_config(GPIO_CFG(27, 0, GPIO_OUTPUT, GPIO_NO_PULL, GPIO_2MA), GPIO_ENABLE);
+}
+
+static int android_vib_power(int on)
+{
+	struct vreg *vreg_vibetoz;
+
+	vreg_vibetoz = vreg_get(0, "gp2");
+
+    if(on)
+    {
+	  vreg_set_level(vreg_vibetoz, 3000);
+	  vreg_enable(vreg_vibetoz);
+    }
+	else
+	{
+	  vreg_disable(vreg_vibetoz);
+	}
+	return 0;
+}
+
+static int open(struct inode *inode, struct file *file) 
+{
+    printk(KERN_INFO "android_vibe: open.\n");
+
+#if 0
+    if (!try_module_get(THIS_MODULE)) 
+    {
+        printk(KERN_INFO "android_vibe: open.error!!!\n");
+   	    return -ENODEV;
+	}
+#endif
+    return 0; 
+}
+
+static int release(struct inode *inode, struct file *file) 
+{
+    printk(KERN_INFO "android_vibe: release.\n");
+
+    /* 
+    ** Reset force and stop timer when the driver is closed, to make sure
+    ** no dangling semaphore remains in the system, especially when the
+    ** driver is run outside of immvibed for testing purposes.
+    */
+
+    return 0; 
+}
+
+static int ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned long arg)
+{
+    printk(KERN_INFO "android_vibe: ioctl.cmd= %d\n",cmd);
+
+    switch (cmd)
+    {
+		case VIBRATION_ON:
+		 /*TODO*/
+//			vibe_set_pwm_freq(0);
+//			gpio_tlmm_config(GPIO_CFG(27,1,0,0,1),GPIO_ENABLE);		
+//			android_vibe_gp_clk_mode(1); /* 1 is on, 0 is off */
+			gpio_direction_output(101,1);
+//			android_vibe_gp_clk_mode(0);
+			printk("android_vibe : turn on MOTOR\n");
+			break;
+		case VIBRATION_OFF:
+		/*TODO*/
+			gpio_direction_output(101,0);
+			printk("android_vibe : turn off MOTOR\n");
+			break;
+	}
+
+	return 0;
+}
+
+static int vibrator_value;
+static int set_vibetonz(int timeout)
+{
+	printk("[VIB] : %d\n",timeout);
+
+	if(!timeout) {
+		gpio_direction_output(101, 0);
+		clk_disable(android_vib_clk);
+	} else {
+		gpio_direction_output(101,0);
+		msleep(1);
+		gpio_direction_output(101,1);
+	}
+	vibrator_value = timeout;
+
+	return 0;
+}
+
+
+
+static ssize_t show_vibrator_info(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%d\n", vibrator_value);
+}
+
+static ssize_t enable_store(
+		struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t size)
+{
+	struct timed_gpio_data *gpio_data = dev_get_drvdata(dev);
+	int value;
+	unsigned long flags;
+
+	sscanf(buf, "%d", &value);
+	spin_lock_irqsave(&gpio_data->lock, flags);
+	/* TODO locking... */
+	set_vibetonz(value);
+	/* TODO unlocking... */
+	spin_unlock_irqrestore(&gpio_data->lock, flags);
+
+	return size;
+}
+//static DEVICE_ATTR(enable, S_IRUGO | S_IWUSR, vibrator_enable_show, vibrator_enable_store);
+static DEVICE_ATTR(vibrator_info, 0444, show_vibrator_info, NULL);
+static DEVICE_ATTR(enable, 0444, enable_store, NULL);
+
+#ifndef CONFIG_ANDROID_POWER
+static int suspend(struct platform_device *pdev, pm_message_t state) 
+{
+    if (g_bIsPlaying)
+    {
+        printk(KERN_INFO "android_vibe: can't suspend, still playing effects.\n");
+        return -EBUSY;
+    }
+    else
+    {
+        printk(KERN_INFO "android_vibe: suspend.\n");
+        return 0;
+    }
+}
+
+static int resume(struct platform_device *pdev) 
+{	
+    printk(KERN_INFO "android_vibe: resume.\n");
+
+	return 0;   /* can resume */
+}
+#endif
+
+#ifdef CONFIG_ANDROID_POWER
+static void vibetonz_early_suspend(struct android_early_suspend *h)
+{
+    if (g_bIsPlaying)
+    {
+        printk(KERN_INFO "android_vibe: can't suspend, still playing effects.\n");
+    }
+    else
+    {
+    	android_vibe_gp_clk_mode(0);  // gpio_27:gp_clk
+        printk(KERN_INFO "android_vibe: suspend.\n");
+    }
+}
+
+static void vibetonz_early_resume(struct android_early_suspend *h)
+{
+	 android_vibe_gp_clk_mode(1);  // gpio_27:gp_clk
+     printk(KERN_INFO "android_vibe: resume.\n");
+}
+
+#endif
+
+static void platform_release(struct device *dev) 
+{	
+    printk(KERN_INFO "android_vibe: platform_release.\n");
+}
+static struct file_operations fops = 
+{
+//    .owner =    THIS_MODULE,
+    .ioctl =    ioctl,
+    .open =     open,
+    .release =  release
+};
+
+#ifndef IMPLEMENT_AS_CHAR_DRIVER
+static struct miscdevice miscdev = 
+{
+	.minor =    MISC_DYNAMIC_MINOR,
+	.name =     MODULE_NAME,
+	.fops =     &fops
+};
+#endif
+
+static struct platform_driver platdrv = 
+{
+#ifndef CONFIG_ANDROID_POWER
+    .suspend =  suspend,	
+    .resume =   resume,	
+#endif
+    .driver = 
+    {		
+        .name = MODULE_NAME,	
+    },	
+};
+
+static struct platform_device platdev = 
+{	
+	.name =     MODULE_NAME,	
+	.id =       -1,                     /* means that there is only one device */
+	.dev = 
+    {
+		.platform_data = NULL, 		
+		.release = platform_release,    /* a warning is thrown during rmmod if this is absent */
+	},
+};
+
+static void vibetonz_release(struct device *dev)
+{
+	printk("vibetonz release\n");
+}
+
+
+static int __init vibetonz_init(void)
+{
+    int nRet;   /* initialized below */
+
+	struct device_driver driver;
+
+	driver.name = "vibrator";
+	driver.owner = THIS_MODULE;
+
+	
+    printk(KERN_INFO "android_vibe: vibetonz_init.\n");
+
+#if 1
+	gpio_data = kzalloc(sizeof(struct timed_gpio_data), GFP_KERNEL);
+	if (!gpio_data)
+		return -ENOMEM;
+
+	spin_lock_init(&gpio_data->lock);
+
+	gpio_data->dev = device_create(timed_gpio_class, NULL, 0, "%s", "vibrator");
+	nRet = device_create_file(gpio_data->dev, &dev_attr_vibrator_info);
+	if (nRet)
+		return nRet;
+	
+	nRet = device_create_file(gpio_data->dev, &dev_attr_enable);
+	if (nRet)
+		return nRet;
+
+    /* Append version information and get buffer length */
+    strcat(g_szDeviceName, VERSION_STR);
+    g_cchDeviceName = strlen(g_szDeviceName);
+
+#ifdef CONFIG_ANDROID_POWER
+	early_suspend.suspend = vibetonz_early_suspend;
+	early_suspend.resume = vibetonz_early_resume;
+	android_register_early_suspend(&early_suspend);
+#endif
+	
+	/* initialize android viberation mode */
+	android_vib_clk = clk_get(NULL,"gp_clk");
+	android_vib_power(1);
+
+	/* clock enable and freq set to 200 */
+	vibe_set_pwm_freq(200);
+	clk_enable(android_vib_clk);
+
+	printk("android viberation initialize OK\n");
+	return 0;
+
+#else
+#ifdef IMPLEMENT_AS_CHAR_DRIVER
+    g_nMajor = register_chrdev(0, MODULE_NAME, &fops);
+    if (g_nMajor < 0) 
+    {
+        printk(KERN_ERR "android_vibe: can't get major number.\n");
+        return g_nMajor;
+    }
+#else
+    nRet = misc_register(&miscdev);
+	if (nRet) 
+    {
+        printk(KERN_ERR "android_vibe: misc_register failed.\n");
+		return nRet;
+	}
+#endif
+
+	nRet = platform_device_register(&platdev);
+	if (nRet) 
+    {
+        printk(KERN_ERR "android_vibe: platform_device_register failed.\n");
+    }
+
+	nRet = platform_driver_register(&platdrv);
+	if (nRet) 
+    {
+        printk(KERN_ERR "android_vibe: platform_driver_register failed.\n");
+    }
+
+
+
+    /* Append version information and get buffer length */
+    strcat(g_szDeviceName, VERSION_STR);
+    g_cchDeviceName = strlen(g_szDeviceName);
+
+#ifdef CONFIG_ANDROID_POWER
+	early_suspend.suspend = vibetonz_early_suspend;
+	early_suspend.resume = vibetonz_early_resume;
+	android_register_early_suspend(&early_suspend);
+#endif
+	
+	/* initialize android viberation mode */
+	android_vib_clk = clk_get(NULL,"gp_clk");
+	android_vib_power(1);
+
+	/* clock enable and freq set to 200 */
+	vibe_set_pwm_freq(200);
+	clk_enable(android_vib_clk);
+
+	printk("android viberation initialize OK\n");
+
+#endif
+
+    return 0;
+}
+
+static void __exit vibetonz_exit(void)
+{
+    printk(KERN_INFO "android_vibe: cleanup_module.\n");
+
+	/* vibrator clock disable */
+	clk_disable(android_vib_clk);
+
+	android_vib_power(0);
+
+	platform_driver_unregister(&platdrv);
+	platform_device_unregister(&platdev);
+
+#ifdef IMPLEMENT_AS_CHAR_DRIVER
+    unregister_chrdev(g_nMajor, MODULE_NAME);
+#else
+    misc_deregister(&miscdev);
+#endif
+}
+
+module_init(vibetonz_init);
+module_exit(vibetonz_exit);
+
+/* Module info */
+MODULE_AUTHOR("Immersion Corporation");
+MODULE_DESCRIPTION("VibeTonz Kernel Module");
+MODULE_LICENSE("GPL v2");
+

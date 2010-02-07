@@ -1,0 +1,93 @@
+ifeq ($(CONFIG_SAMSUNG_CAPELA),y)
+MSM_FB := ./drivers/video/msm/
+EXTRA_CFLAGS += -I$(MSM_FB)
+endif
+obj-y := msm_fb.o
+
+ifeq ($(CONFIG_FB_MSM_LOGO),y)
+obj-y += logo.o
+endif
+
+ifeq ($(CONFIG_FB_MSM_SEC_BOOTLOGO),y)
+obj-y += msm_fb_progress.o
+endif
+
+ifeq ($(CONFIG_FB_BACKLIGHT),y)
+obj-y += msm_fb_bl.o 
+endif
+
+# MDP
+obj-y += mdp.o
+obj-y += mdp_hw_init.o
+obj-y += mdp_ppp.o
+ifeq ($(CONFIG_FB_MSM_MDP31),y)
+obj-y += mdp_ppp_v31.o
+else
+obj-y += mdp_ppp_v20.o
+endif
+obj-y += mdp_dma.o
+obj-y += mdp_dma_s.o
+obj-y += mdp_vsync.o
+obj-y += mdp_dma_lcdc.o
+obj-y += mdp_cursor.o
+obj-y += mdp_dma_tv.o
+
+# EBI2
+obj-$(CONFIG_FB_MSM_EBI2) += ebi2_lcd.o
+
+# LCDC
+obj-$(CONFIG_FB_MSM_LCDC) += lcdc.o
+
+# MDDI
+#msm_mddi-objs := mddi.o mddihost.o mddihosti.o
+obj-y +=mddi.o mddihost.o mddihosti.o
+#obj-$(CONFIG_FB_MSM_MDDI) += msm_mddi.o
+
+# External MDDI
+msm_mddi_ext-objs := mddihost_e.o mddi_ext.o
+obj-$(CONFIG_FB_MSM_EXTMDDI) += msm_mddi_ext.o
+
+# TVEnc
+obj-$(CONFIG_FB_MSM_TVOUT) += tvenc.o
+
+# MSM FB Panel
+obj-y += msm_fb_panel.o
+obj-$(CONFIG_FB_MSM_EBI2_TMD_QVGA_EPSON_QCIF) += ebi2_tmd20.o
+obj-$(CONFIG_FB_MSM_EBI2_TMD_QVGA_EPSON_QCIF) += ebi2_l2f.o
+
+ifeq ($(CONFIG_FB_MSM_MDDI_AUTO_DETECT),y)
+obj-y += mddi_prism.o
+obj-y += mddi_toshiba.o
+obj-y += mddi_toshiba_vga.o
+#obj-y += mddi_toshiba_wvga_pt.o
+#obj-y += mddi_toshiba_wvga.o
+obj-y += mddi_sharp.o
+else
+obj-$(CONFIG_FB_MSM_MDDI_PRISM_WVGA) += mddi_prism.o
+obj-$(CONFIG_FB_MSM_MDDI_TOSHIBA_COMMON) += mddi_toshiba.o
+obj-$(CONFIG_FB_MSM_MDDI_TOSHIBA_COMMON_VGA) += mddi_toshiba_vga.o
+obj-$(CONFIG_FB_MSM_MDDI_TOSHIBA_WVGA_PORTRAIT) += mddi_toshiba_wvga_pt.o
+obj-$(CONFIG_FB_MSM_MDDI_TOSHIBA_WVGA) += mddi_toshiba_wvga.o
+obj-$(CONFIG_FB_MSM_MDDI_SHARP_QVGA_128x128) += mddi_sharp.o
+endif
+
+#if defined(CONFIG_SAMSUNG_CAPELA)
+obj-$(CONFIG_FB_MSM_MDDI_SAMSUNG_HVGA) += mddi_samsung.o blight_bd6091.o
+#endif /* CONFIG_SAMSUNG_CAPELA */
+
+ifeq ($(CONFIG_SAMSUNG_CAPELA),y)
+obj-$(CONFIG_FB_MSM_MDDI_TOSHIBA_HVGA) += panel/mddi/mddi_toshiba_smd.o
+endif
+
+obj-$(CONFIG_FB_MSM_LCDC_PANEL) += lcdc_panel.o
+obj-$(CONFIG_FB_MSM_LCDC_PRISM_WVGA) += lcdc_prism.o
+obj-$(CONFIG_FB_MSM_LCDC_EXTERNAL_SVGA) += lcdc_external.o
+obj-$(CONFIG_FB_MSM_LCDC_GORDON_VGA) += lcdc_gordon.o
+
+obj-$(CONFIG_FB_MSM_TVOUT_NTSC) += tv_ntsc.o
+obj-$(CONFIG_FB_MSM_TVOUT_PAL) += tv_pal.o
+
+obj-$(CONFIG_FB_MSM_EXTMDDI_SVGA) += mddi_ext_lcd.o
+
+clean:
+	rm *.o .*cmd

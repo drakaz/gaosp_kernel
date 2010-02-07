@@ -1,0 +1,36 @@
+*************** __be32 __init root_nfs_parse_addr(char *name)
+*** 1272,1277 ****
+  static int __init ip_auto_config(void)
+  {
+  	__be32 addr;
+  
+  #ifdef CONFIG_PROC_FS
+  	proc_net_fops_create(&init_net, "pnp", S_IRUGO, &pnp_seq_fops);
+--- 1272,1280 ----
+  static int __init ip_auto_config(void)
+  {
+  	__be32 addr;
++ #ifdef IPCONFIG_DYNAMIC
++ 	int retries = CONF_OPEN_RETRIES;
++ #endif
+  
+  #ifdef CONFIG_PROC_FS
+  	proc_net_fops_create(&init_net, "pnp", S_IRUGO, &pnp_seq_fops);
+*************** static int __init ip_auto_config(void)
+*** 1308,1316 ****
+  #endif
+  	    ic_first_dev->next) {
+  #ifdef IPCONFIG_DYNAMIC
+- 
+- 		int retries = CONF_OPEN_RETRIES;
+- 
+  		if (ic_dynamic() < 0) {
+  			ic_close_devs();
+  
+--- 1311,1316 ----
+  #endif
+  	    ic_first_dev->next) {
+  #ifdef IPCONFIG_DYNAMIC
+  		if (ic_dynamic() < 0) {
+  			ic_close_devs();
+  

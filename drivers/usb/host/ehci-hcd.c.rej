@@ -1,0 +1,40 @@
+*************** static irqreturn_t ehci_irq (struct usb_hcd *hcd)
+*** 731,749 ****
+  
+  	/* PCI errors [4.15.2.4] */
+  	if (unlikely ((status & STS_FATAL) != 0)) {
+  		dbg_cmd (ehci, "fatal", ehci_readl(ehci,
+  						   &ehci->regs->command));
+  		dbg_status (ehci, "fatal", status);
+- 		if (status & STS_HALT) {
+- 			ehci_err (ehci, "fatal error\n");
+  dead:
+- 			ehci_reset (ehci);
+- 			ehci_writel(ehci, 0, &ehci->regs->configured_flag);
+- 			/* generic layer kills/unlinks all urbs, then
+- 			 * uses ehci_stop to clean up the rest
+- 			 */
+- 			bh = 1;
+- 		}
+  	}
+  
+  	if (bh)
+--- 733,750 ----
+  
+  	/* PCI errors [4.15.2.4] */
+  	if (unlikely ((status & STS_FATAL) != 0)) {
++ 		ehci_err(ehci, "fatal error\n");
+  		dbg_cmd (ehci, "fatal", ehci_readl(ehci,
+  						   &ehci->regs->command));
+  		dbg_status (ehci, "fatal", status);
++ 		ehci_halt(ehci);
+  dead:
++ 		ehci_reset(ehci);
++ 		ehci_writel(ehci, 0, &ehci->regs->configured_flag);
++ 		/* generic layer kills/unlinks all urbs, then
++ 		 * uses ehci_stop to clean up the rest
++ 		 */
++ 		bh = 1;
+  	}
+  
+  	if (bh)

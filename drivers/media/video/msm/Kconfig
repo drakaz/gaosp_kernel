@@ -1,0 +1,26 @@
+comment "Camera Sensor Selection"
+config MT9T013
+	bool "Sensor mt9t013 (BAYER 3M)"
+	---help---
+	  MICRON 3M Bayer Sensor with AutoFocus
+
+config MT9D112
+	bool "Sensor mt9d112 (YUV   2M)"
+	---help---
+	  MICRON 2M YUV Sensor
+#PGH added #####################
+config SENSOR_S5K4CA
+    bool "Sensor S5K4CA (YUV   3M)"
+    ---help---
+      SAMSUNG 3M YUV Sensor
+
+config SENSOR_AIT848
+    bool "Sensor AIT848 (YUV 422, 5M)"
+    ---help---
+      AIT ISP + SAMSUNG LSI SENSOR
+
+config SENSOR_M4MO
+    bool "M4MO ISP (YUV 422, 5M)"
+    ---help---
+      FUJITSU ISP + SAMSUNG LSI SENSOR
+
