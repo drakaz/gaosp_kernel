@@ -33,7 +33,6 @@ deps_config := \
 	fs/freevxfs/Kconfig \
 	fs/squashfs/Kconfig \
 	fs/cramfs/Kconfig \
-	fs/rfs/Kconfig \
 	fs/ubifs/Kconfig \
 	fs/jffs2/Kconfig \
 	fs/yaffs2/Kconfig \
@@ -235,6 +234,7 @@ deps_config := \
 	drivers/char/pcmcia/Kconfig \
 	drivers/char/hw_random/Kconfig \
 	drivers/char/ipmi/Kconfig \
+	drivers/char/diag/Kconfig \
 	drivers/serial/Kconfig \
 	drivers/char/Kconfig \
 	drivers/input/gameport/Kconfig \
@@ -269,6 +269,7 @@ deps_config := \
 	drivers/net/usb/Kconfig \
 	drivers/net/wimax/i2400m/Kconfig \
 	drivers/net/wimax/Kconfig \
+	drivers/net/wireless/broadcom/Kconfig \
 	drivers/net/wireless/rt2x00/Kconfig \
 	drivers/net/wireless/zd1211rw/Kconfig \
 	drivers/net/wireless/b43legacy/Kconfig \
@@ -321,8 +322,6 @@ deps_config := \
 	drivers/pnp/isapnp/Kconfig \
 	drivers/pnp/Kconfig \
 	drivers/parport/Kconfig \
-	drivers/tfsr/Kconfig \
-	drivers/fsr/Kconfig \
 	drivers/mtd/ubi/Kconfig.debug \
 	drivers/mtd/ubi/Kconfig \
 	drivers/mtd/lpddr/Kconfig \
@@ -458,7 +457,7 @@ deps_config := \
 include/config/auto.conf: \
 	$(deps_config)
 
-ifneq "$(KERNELVERSION)" "2.6.29"
+ifneq "$(KERNELVERSION)" "2.6.29-bfs302"
 include/config/auto.conf: FORCE
 endif
 ifneq "$(ARCH)" "arm"
