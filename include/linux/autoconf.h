@@ -1,7 +1,7 @@
 /*
  * Automatically generated C config: don't edit
  * Linux kernel version: 2.6.29-bfs302
- * Fri Apr 23 13:07:03 2010
+ * Fri Apr 23 13:24:58 2010
  */
 #define AUTOCONF_INCLUDED
 #define CONFIG_VIDEO_V4L1_COMPAT 1
@@ -210,6 +210,7 @@
 #define CONFIG_MEDIA_TUNER_TEA5767 1
 #define CONFIG_MEDIA_TUNER_MT20XX 1
 #define CONFIG_ARCH_SUSPEND_POSSIBLE 1
+#define CONFIG_DEBUG_FS 1
 #define CONFIG_SWITCH_GPIO 1
 #define CONFIG_MSM_SUSPEND_STATS_FIRST_BUCKET 1000000000
 #define CONFIG_ANDROID_TIMED_GPIO 1
