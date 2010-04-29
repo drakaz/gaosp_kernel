@@ -148,15 +148,16 @@ static struct clkctl_acpu_speed pll0_196_pll1_768_pll2_1056[] = {
 
 /* 7x01/7x25 turbo with GSM capable modem */
 static struct clkctl_acpu_speed pll0_245_pll1_960_pll2_1056[] = {
-	{ 0, 19200, ACPU_PLL_TCXO, 0, 0, 19200, 0, 0, 30720 },
-	{ 0, 120000, ACPU_PLL_1, 1, 7,  60000, 1, 3,  61440 },
+	{ 1, 19200, ACPU_PLL_TCXO, 0, 0, 19200, 0, 0, 30720 },
+	{ 1, 120000, ACPU_PLL_1, 1, 7,  60000, 1, 3,  61440 },
 	{ 1, 122880, ACPU_PLL_0, 4, 1,  61440, 1, 3,  61440 },
-	{ 0, 176000, ACPU_PLL_2, 2, 5,  88000, 1, 3,  61440 },
+	{ 1, 176000, ACPU_PLL_2, 2, 5,  88000, 1, 3,  61440 },
 	{ 1, 245760, ACPU_PLL_0, 4, 0,  81920, 2, 4,  61440 },
 	{ 1, 320000, ACPU_PLL_1, 1, 2, 107000, 2, 5, 120000 },
-	{ 0, 352000, ACPU_PLL_2, 2, 2,  88000, 3, 5, 120000 },
+	{ 1, 352000, ACPU_PLL_2, 2, 2,  88000, 3, 5, 120000 },
 	{ 1, 480000, ACPU_PLL_1, 1, 1, 120000, 3, 6, 120000 },
 	{ 1, 528000, ACPU_PLL_2, 2, 1, 132000, 3, 7, 122880 },
+	{ 1, 614400, ACPU_PLL_2, 2, 0, 132000, 3, 7, 122880 },
 	{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {0, 0, 0}, {0, 0, 0} }
 };
 
@@ -393,7 +394,7 @@ static int acpuclk_set_vdd_level(int vdd)
 
 /* Set proper dividers for the given clock speed. */
 static void acpuclk_set_div(const struct clkctl_acpu_speed *hunt_s) {
-	uint32_t reg_clkctl, reg_clksel, clk_div, src_sel;
+	uint32_t reg_clkctl, reg_clksel, clk_div, src_sel, a11_div;
 
 	reg_clksel = readl(A11S_CLK_SEL_ADDR);
 
@@ -401,6 +402,15 @@ static void acpuclk_set_div(const struct clkctl_acpu_speed *hunt_s) {
 	clk_div = (reg_clksel >> 1) & 0x03;
 	/* CLK_SEL_SRC1NO */
 	src_sel = reg_clksel & 1;
+
+	a11_div=hunt_s->a11clk_src_div;
+
+	if(hunt_s->a11clk_khz>528000) {
+		a11_div=0;
+		writel(0x25, MSM_CLK_CTL_BASE+0x33C);
+		udelay(50);
+	}
+
 
 	/*
 	 * If the new clock divider is higher than the previous, then
@@ -416,7 +426,7 @@ static void acpuclk_set_div(const struct clkctl_acpu_speed *hunt_s) {
 		reg_clkctl = readl(A11S_CLK_CNTL_ADDR);
 	reg_clkctl &= ~(0xFF << (8 * src_sel));
 	reg_clkctl |= hunt_s->a11clk_src_sel << (4 + 8 * src_sel);
-	reg_clkctl |= hunt_s->a11clk_src_div << (0 + 8 * src_sel);
+	reg_clkctl |= a11_div << (0 + 8 * src_sel);
 		writel(reg_clkctl, A11S_CLK_CNTL_ADDR);
 
 		/* Program clock source selection */
