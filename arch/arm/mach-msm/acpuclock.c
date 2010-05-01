@@ -101,6 +101,8 @@ struct clkctl_acpu_speed {
 /* Pointers in acpu_freq_tbl[] for max up/down steppings. */
 	struct clkctl_acpu_speed *down[3];
 	struct clkctl_acpu_speed *up[3];
+	// For overclocking via PLL2 L val
+	short    pll2_lval;
 };
 
 static remote_spinlock_t pll_lock;
@@ -157,7 +159,15 @@ static struct clkctl_acpu_speed pll0_245_pll1_960_pll2_1056[] = {
 	{ 1, 352000, ACPU_PLL_2, 2, 2,  88000, 3, 5, 120000 },
 	{ 1, 480000, ACPU_PLL_1, 1, 1, 120000, 3, 6, 120000 },
 	{ 1, 528000, ACPU_PLL_2, 2, 1, 132000, 3, 7, 122880 },
-	{ 1, 614400, ACPU_PLL_2, 2, 0, 132000, 3, 7, 122880 },
+	{ 1, 547200, ACPU_PLL_2, 2, 1, 132000, 3, 7, 160000 },
+	{ 1, 566400, ACPU_PLL_2, 2, 1, 132000, 3, 7, 160000 },
+	{ 1, 585600, ACPU_PLL_2, 2, 1, 132000, 3, 7, 160000 },
+	{ 1, 614000, ACPU_PLL_2, 2, 1, 132000, 3, 7, 160000 },
+	{ 1, 633200, ACPU_PLL_2, 2, 1, 132000, 3, 7, 160000 },
+	{ 1, 652400, ACPU_PLL_2, 2, 1, 132000, 3, 7, 160000 },
+	{ 1, 671600, ACPU_PLL_2, 2, 1, 132000, 3, 7, 160000 },
+	{ 1, 690800, ACPU_PLL_2, 2, 1, 132000, 3, 7, 160000 },
+	{ 1, 710000, ACPU_PLL_2, 2, 1, 132000, 3, 7, 160000 },
 	{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {0, 0, 0}, {0, 0, 0} }
 };
 
@@ -403,11 +413,11 @@ static void acpuclk_set_div(const struct clkctl_acpu_speed *hunt_s) {
 	/* CLK_SEL_SRC1NO */
 	src_sel = reg_clksel & 1;
 
-	a11_div=hunt_s->a11clk_src_div;
 
-	if(hunt_s->a11clk_khz>528000) {
-		a11_div=0;
-		writel(0x25, MSM_CLK_CTL_BASE+0x33C);
+	a11_div=hunt_s->a11clk_src_div;
+	if (hunt_s->a11clk_khz > 528000) {
+		a11_div = 0;
+		 writel(hunt_s->a11clk_khz/19200, MSM_CLK_CTL_BASE+0x33c);
 		udelay(50);
 	}
 
