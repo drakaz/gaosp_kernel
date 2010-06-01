@@ -1306,8 +1306,9 @@ int mdp_ppp_blit(struct fb_info *info, struct mdp_blit_req *req,
 	if (req->flags & MDP_BLEND_FG_PREMULT) {
 #ifdef CONFIG_FB_MSM_MDP31
 		iBuf.mdpImg.mdpOp |= MDPOP_FG_PM_ALPHA;
-#else
-		return -EINVAL;
+// drakaz : remove on double check on req->flags & MDP_BLEND_FG_PREMULT
+//#else
+//		return -EINVAL;
 #endif
 	}
 
