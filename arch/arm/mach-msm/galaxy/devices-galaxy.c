@@ -12,6 +12,8 @@
  * GNU General Public License for more details.
  */
 
+// drakaz : 3D patch
+
 #include <linux/kernel.h>
 #include <linux/platform_device.h>
 
@@ -333,21 +335,16 @@ static struct android_pmem_platform_data android_pmem_pdata = {
 	.cached = 1,
 };
 
+struct android_pmem_platform_data android_pmem_gpu1_pdata = {
+       .name = "pmem_gpu1",
+       .allocator_type = PMEM_ALLOCATORTYPE_ALLORNOTHING,
+       .cached = 0,
+};
+
+
 static struct android_pmem_platform_data android_pmem_adsp_pdata = {
 	.name = "pmem_adsp",
 	.allocator_type = PMEM_ALLOCATORTYPE_BUDDYBESTFIT,
-	.cached = 0,
-};
-
-static struct android_pmem_platform_data android_pmem_gpu0_pdata = {
-	.name = "pmem_gpu0",
-	.allocator_type = PMEM_ALLOCATORTYPE_ALLORNOTHING,
-	.cached = 0,
-};
-
-struct android_pmem_platform_data android_pmem_gpu1_pdata = {
-	.name = "pmem_gpu1",
-	.allocator_type = PMEM_ALLOCATORTYPE_ALLORNOTHING,
 	.cached = 0,
 };
 
@@ -369,21 +366,9 @@ static struct platform_device android_pmem_adsp_device = {
 	.dev = { .platform_data = &android_pmem_adsp_pdata },
 };
 
-static struct platform_device android_pmem_gpu0_device = {
-	.name = "android_pmem",
-	.id = 2,
-	.dev = { .platform_data = &android_pmem_gpu0_pdata },
-};
-
-static struct platform_device android_pmem_gpu1_device = {
-	.name = "android_pmem",
-	.id = 3,
-	.dev = { .platform_data = &android_pmem_gpu1_pdata },
-};
-
 static struct platform_device android_pmem_camera_device = {
 	.name = "android_pmem",
-	.id = 4,
+	.id = 2,
 	.dev = { .platform_data = &android_pmem_camera_pdata },
 };
 
@@ -406,7 +391,6 @@ static struct platform_device ram_console_device = {
 	.resource       = ram_console_resource,
 };
 
-#if 0
 static struct resource resources_hw3d[] = {
 	{
 		.start	= 0xA0000000,
@@ -436,7 +420,7 @@ static struct platform_device hw3d_device = {
 	.num_resources	= ARRAY_SIZE(resources_hw3d),
 	.resource	= resources_hw3d,
 };
-#endif
+
 
 void __init msm_add_mem_devices(struct msm_pmem_setting *setting)
 {
@@ -452,6 +436,7 @@ void __init msm_add_mem_devices(struct msm_pmem_setting *setting)
 		platform_device_register(&android_pmem_adsp_device);
 	}
 
+/*
 	if (setting->pmem_gpu0_size) {
 		android_pmem_gpu0_pdata.start = setting->pmem_gpu0_start;
 		android_pmem_gpu0_pdata.size = setting->pmem_gpu0_size;
@@ -465,8 +450,8 @@ void __init msm_add_mem_devices(struct msm_pmem_setting *setting)
 		#endif
 		platform_device_register(&android_pmem_gpu1_device);
 	}
+*/
 
-#if 0
 	if (setting->pmem_gpu0_size && setting->pmem_gpu1_size) {
 		struct resource *res;
 
@@ -477,11 +462,12 @@ void __init msm_add_mem_devices(struct msm_pmem_setting *setting)
 
 		res = platform_get_resource_byname(&hw3d_device, IORESOURCE_MEM,
 						   "ebi");
-		res->start = android_pmem_gpu1_pdata.start; // setting->pmem_gpu1_start; // using dynamically allocated addr
+		res->start = android_pmem_gpu1_pdata.start; 
+//		res->start = setting->pmem_gpu1_start; // using dynamically allocated addr
 		res->end = res->start + setting->pmem_gpu1_size - 1;
 		platform_device_register(&hw3d_device);
 	}
-#endif
+
 
 	if (setting->pmem_camera_size) {
 		android_pmem_camera_pdata.start = setting->pmem_camera_start;
