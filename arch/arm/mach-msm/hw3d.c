@@ -207,8 +207,6 @@ static long hw3d_wait_for_interrupt(struct hw3d_info *info, struct file *filp)
 	return 0;
 }
 
-
-// drakaz : 3D patch. Broke 3D in <= Donut
 static long hw3d_wait_for_revoke(struct hw3d_info *info, struct file *filp)
 {
 	struct hw3d_data *data = filp->private_data;
@@ -228,6 +226,7 @@ static long hw3d_wait_for_revoke(struct hw3d_info *info, struct file *filp)
 		return ret;
 	return 0;
 }
+
 static void locked_hw3d_client_done(struct hw3d_info *info, int had_timer)
 {
 	if (info->enabled) {
@@ -237,7 +236,6 @@ static void locked_hw3d_client_done(struct hw3d_info *info, int had_timer)
 		clk_disable(info->imem_clk);
 	}
 	info->revoking = 0;
-	info->client_file = NULL;
 
 	/* double check that the irqs are disabled */
 	locked_hw3d_irq_disable(info);
@@ -283,8 +281,6 @@ static void locked_hw3d_revoke(struct hw3d_info *info)
 bool is_msm_hw3d_file(struct file *file)
 {
 	struct hw3d_info *info = hw3d_info;
-	if(!file || !file->f_dentry || !file->f_dentry->d_inode)
-		return 0;
 	if (MAJOR(file->f_dentry->d_inode->i_rdev) == MISC_MAJOR &&
 	    (is_master(info, file) || is_client(info, file)))
 		return 1;
@@ -298,19 +294,22 @@ void put_msm_hw3d_file(struct file *file)
 	fput(file);
 }
 
-int get_msm_hw3d_file(int fd, int region, uint32_t offs, unsigned long *pbase,
+int get_msm_hw3d_file(int fd, uint32_t *offs, unsigned long *pbase,
 		      unsigned long *len, struct file **filp)
 {
 	struct hw3d_info *info = hw3d_info;
 	struct file *file;
 	struct hw3d_data *data;
+	uint32_t offset = HW3D_OFFSET_IN_REGION(*offs);
+	int region = HW3D_REGION_ID(*offs);
 	int ret = 0;
+
 	if (unlikely(region >= HW3D_NUM_REGIONS)) {
 		VDBG("hw3d: invalid region %d requested\n", region);
 		return -EINVAL;
-	} else if (unlikely(offs >= info->regions[region].size)) {
+	} else if (unlikely(offset >= info->regions[region].size)) {
 		VDBG("hw3d: offset %08x outside of the requested region %d\n",
-		     offs, region);
+		     offset, region);
 		return -EINVAL;
 	}
 
@@ -339,6 +338,7 @@ int get_msm_hw3d_file(int fd, int region, uint32_t offs, unsigned long *pbase,
 		goto err;
 	}
 
+	*offs = offset;
 	*pbase = info->regions[region].pbase;
 	*filp = file;
 	*len = data->vmas[region]->vm_end - data->vmas[region]->vm_start;
@@ -346,7 +346,7 @@ int get_msm_hw3d_file(int fd, int region, uint32_t offs, unsigned long *pbase,
 	return 0;
 
 err:
-	fput(file);	
+	fput(file);
 	return ret;
 }
 
@@ -377,6 +377,7 @@ static int hw3d_open(struct inode *inode, struct file *file)
 	struct hw3d_data *data;
 	unsigned long flags;
 	int ret = 0;
+
 	pr_info("%s: pid %d tid %d opening %s node\n", __func__,
 		current->group_leader->pid, current->pid,
 		is_master(info, file) ? "master" : "client");
@@ -443,6 +444,7 @@ err:
 	file->private_data = NULL;
 	kfree(data);
 	return ret;
+
 }
 
 static int hw3d_release(struct inode *inode, struct file *file)
@@ -467,18 +469,20 @@ static int hw3d_release(struct inode *inode, struct file *file)
 		put_task_struct(info->client_task);
 		info->client_task = NULL;
 	}
+
 	if (info->client_file && info->client_file == file) {
 		int pending;
 		/* this will be true if we are still the "owner" of the gpu */
 		pr_debug("hw3d: had file\n");
 		pending = del_timer(&info->revoke_timer);
 		locked_hw3d_client_done(info, pending);
-	}
+		info->client_file = NULL;
+	} else
+		pr_warning("hw3d: release without client_file.\n");
 	spin_unlock_irqrestore(&info->lock, flags);
 
 done:
 	kfree(data);
-
 	return 0;
 }
 
@@ -608,6 +612,7 @@ static long hw3d_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	default:
 		return -EINVAL;
 	}
+
 	return 0;
 }
 
@@ -620,7 +625,7 @@ static void hw3d_early_suspend(struct early_suspend *h)
 	spin_lock_irqsave(&info->lock, flags);
 	info->suspending = 1;
 	if (info->client_file) {
-		pr_debug("hw3d: Requesting revoke for suspend\n");
+		pr_info("hw3d: Requesting revoke for suspend\n");
 		locked_hw3d_revoke(info);
 	}
 	spin_unlock_irqrestore(&info->lock, flags);
@@ -628,14 +633,13 @@ static void hw3d_early_suspend(struct early_suspend *h)
 
 static void hw3d_late_resume(struct early_suspend *h)
 {
-
-
 	unsigned long flags;
 	struct hw3d_info *info;
 	info = container_of(h, struct hw3d_info, early_suspend);
 
 	spin_lock_irqsave(&info->lock, flags);
-	pr_info("%s: resuming\n", __func__);
+	if (info->suspending)
+		pr_info("%s: resuming\n", __func__);
 	info->suspending = 0;
 	spin_unlock_irqrestore(&info->lock, flags);
 }
@@ -646,7 +650,8 @@ static int hw3d_resume(struct platform_device *pdev)
 	unsigned long flags;
 
 	spin_lock_irqsave(&info->lock, flags);
-	pr_info("%s: resuming\n", __func__);
+	if (info->suspending)
+		pr_info("%s: resuming\n", __func__);
 	info->suspending = 0;
 	spin_unlock_irqrestore(&info->lock, flags);
 	return 0;
@@ -704,6 +709,7 @@ static int __init hw3d_probe(struct platform_device *pdev)
 		ret = PTR_ERR(info->imem_clk);
 		goto err_get_imem_clk;
 	}
+
 	for (i = 0; i < HW3D_NUM_REGIONS; ++i) {
 		info->regions[i].pbase = res[i]->start;
 		info->regions[i].size = res[i]->end - res[i]->start + 1;
@@ -734,7 +740,8 @@ static int __init hw3d_probe(struct platform_device *pdev)
 	if (ret) {
 		pr_err("%s: Cannot register client device node\n", __func__);
 		goto err_misc_reg_client;
-}
+	}
+
 	info->early_suspend.suspend = hw3d_early_suspend;
 	info->early_suspend.resume = hw3d_late_resume;
 	info->early_suspend.level = EARLY_SUSPEND_LEVEL_DISABLE_FB;
@@ -790,3 +797,4 @@ static int __init hw3d_init(void)
 }
 
 device_initcall(hw3d_init);
+

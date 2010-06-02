@@ -476,8 +476,8 @@ void __init msm_add_mem_devices(struct msm_pmem_setting *setting)
 	}
  
 	if (setting->pmem_kernel_ebi1_size) {
-		//android_pmem_kernel_ebi1_pdata.start = setting->pmem_kernel_ebi1_start;
-		//android_pmem_kernel_ebi1_pdata.size = setting->pmem_kernel_ebi1_size;
+		android_pmem_kernel_ebi1_pdata.start = setting->pmem_kernel_ebi1_start;
+		android_pmem_kernel_ebi1_pdata.size = setting->pmem_kernel_ebi1_size;
 		platform_device_register(&android_pmem_kernel_ebi1_device);
 	}
 
