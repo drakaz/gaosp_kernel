@@ -77,6 +77,7 @@
 
 #include "mdp.h"
 #include "msm_fb.h"
+#include <linux/msm_hw3d.h>
 
 static struct clk *mdp_clk;
 static struct clk *mdp_pclk;

@@ -36,6 +36,7 @@
 
 #include "mdp.h"
 #include "msm_fb.h"
+#include <linux/msm_hw3d.h>
 
 static uint32_t bytes_per_pixel[] = {
 	[MDP_RGB_565] = 2,
@@ -1194,7 +1195,8 @@ static int mdp_ppp_verify_req(struct mdp_blit_req *req)
 	return 0;
 }
 
-int get_img(struct mdp_img *img, struct fb_info *info, unsigned long *start,
+
+static int get_img(struct mdp_img *img, struct fb_info *info, unsigned long *start,
 	    unsigned long *len, struct file **pp_file)
 {
 	int put_needed, ret = 0;
@@ -1206,6 +1208,9 @@ int get_img(struct mdp_img *img, struct fb_info *info, unsigned long *start,
 #ifdef CONFIG_ANDROID_PMEM
 	if (!get_pmem_file(img->memory_id, start, &vstart, len, pp_file))
 		return 0;
+ 	else if (!get_msm_hw3d_file(img->memory_id, &img->offset, start, len,
+            				pp_file))
+		return 0;
 #endif
 	file = fget_light(img->memory_id, &put_needed);
 	if (file == NULL)
@@ -1215,6 +1220,7 @@ int get_img(struct mdp_img *img, struct fb_info *info, unsigned long *start,
 		*start = info->fix.smem_start;
 		*len = info->fix.smem_len;
 		*pp_file = file;
+		ret = 0;
 	} else {
 		ret = -1;
 		fput_light(file, put_needed);

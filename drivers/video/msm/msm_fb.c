@@ -39,6 +39,7 @@
 #include <linux/console.h>
 #include <linux/android_pmem.h>
 #include <linux/leds.h>
+#include <linux/msm_hw3d.h>
 
 #define MSM_FB_C
 #include "msm_fb.h"
@@ -1567,16 +1568,19 @@ int msm_fb_resume_sw_refresher(struct msm_fb_data_type *mfd)
 	return 0;
 }
 
-void mdp_ppp_put_img(struct mdp_blit_req *req, struct file *p_src_file,
-		struct file *p_dst_file)
+void mdp_ppp_put_img(struct file *file)
 {
 #ifdef CONFIG_ANDROID_PMEM
-	if (p_src_file)
-		put_pmem_file(p_src_file);
-	if (p_dst_file)
-		put_pmem_file(p_dst_file);
+	if (file) {
+   		if (is_msm_hw3d_file(file)) {
+     			put_msm_hw3d_file(file);
+		} else {
+			put_pmem_file(file);
+		}
+	}
 #endif
 }
+
 
 int mdp_blit(struct fb_info *info, struct mdp_blit_req *req)
 {
@@ -1590,7 +1594,8 @@ int mdp_blit(struct fb_info *info, struct mdp_blit_req *req)
 		return 0;
 
 	ret = mdp_ppp_blit(info, req, &p_src_file, &p_dst_file);
-	mdp_ppp_put_img(req, p_src_file, p_dst_file);
+	mdp_ppp_put_img(p_src_file);
+	mdp_ppp_put_img(p_dst_file);
 	return ret;
 }
 
