@@ -4,9 +4,6 @@ SUBLEVEL = 29
 EXTRAVERSION = -bfs302
 NAME = Temporary Tasmanian Devil
 
-# Force cross compilation
-export CROSS_COMPILE=../../../Android/CupCake/Original/prebuilt/linux-x86/toolchain/arm-eabi-4.2.1/bin/arm-eabi-
-
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
 # More info can be located in ./README
@@ -197,7 +194,6 @@ SUBARCH = arm
 
 export KBUILD_BUILDHOST := $(SUBARCH)
 ARCH		?= $(SUBARCH)
-CROSS_COMPILE	?= ../../../Android/CupCake/Original/prebuilt/linux-x86/toolchain/arm-eabi-4.2.1/bin/arm-eabi-
 
 # Architecture as present in compile.h
 UTS_MACHINE 	:= $(ARCH)
