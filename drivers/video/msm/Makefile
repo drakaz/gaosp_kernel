@@ -77,7 +77,7 @@ obj-$(CONFIG_FB_MSM_MDDI_SAMSUNG_HVGA) += mddi_samsung.o blight_bd6091.o
 #endif /*CONFIG_SAMSUNG_BIGFOOT*/
 # hsil 0120
 ifeq ($(CONFIG_SAMSUNG_TARGET),y)
-obj-$(CONFIG_FB_MSM_MDDI_TOSHIBA_HVGA) += panel/mddi/mddi_toshiba_smd.o
+obj-$(CONFIG_FB_MSM_MDDI_TOSHIBA_HVGA) += mddi_toshiba_smd.o
 endif
 
 obj-$(CONFIG_FB_MSM_LCDC_PANEL) += lcdc_panel.o
