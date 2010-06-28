@@ -39,7 +39,7 @@
 #include <linux/msm_hw3d.h>
 
 
-#define DEBUG 0
+//#define DEBUG
 
 static uint32_t bytes_per_pixel[] = {
 	[MDP_RGB_565] = 2,
