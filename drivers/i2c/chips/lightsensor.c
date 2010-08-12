@@ -14,7 +14,7 @@
 #include <linux/earlysuspend.h>
 #endif
 
-#define DEBUG 0
+#define DEBUG 1
 #define TIME_INT (2*HZ)  // 2 sec
 
 static struct workqueue_struct *lightsensor_wq;
@@ -134,7 +134,10 @@ static void lightsensor_work_func(struct work_struct *work)
 	test_value = raw_data;
 	
 	lightsensor_light_level = test_value;
-//  printk("[LIGHTSENSOR] level for factory app. = %d\n", lightsensor_light_level );
+
+#if DEBUG
+	printk("[LIGHTSENSOR] level for factory app. = %d\n", lightsensor_light_level );
+#endif
 
 // below codes for LCD level tuning temporarily
 // 3 level setting ( Min: 1 level(120cd), Middle: 6 level(240cd), 10 level(350cd))
@@ -145,11 +148,15 @@ static void lightsensor_work_func(struct work_struct *work)
 	else 
 		present_value = 22;
 
-// To test
-//	printk("[LIGHTSENSOR] level=%d , value=%d\n", present_level,test_value );
+#if DEBUG
+	printk("[LIGHTSENSOR] level=%d , value=%d\n", present_level,test_value );
+#endif
+
 	if ( present_value == previous_value )
 	{
-//		printk("[LIGHTSENSOR] #1, previous=%d, present_%d, cnt=%d\n", previous_value , present_value, cnt );
+#if DEBUG
+		printk("[LIGHTSENSOR] #1, previous=%d, present_%d, cnt=%d\n", previous_value , present_value, cnt );
+#endif
 		cnt++;
 		
 		if(cnt >= 3 )
