@@ -92,14 +92,14 @@ int vm_dirty_ratio = 10;
 unsigned long vm_dirty_bytes;
 
 /*
- * The interval between `kupdate'-style writebacks
+ * The interval between `kupdate'-style writebacks, in jiffies
  */
-unsigned int dirty_writeback_interval = 5 * 100; /* sentiseconds */
+int dirty_writeback_interval = 5 * HZ;
 
 /*
- * The longest time for which data is allowed to remain dirty
+ * The longest number of jiffies for which data is allowed to remain dirty
  */
-unsigned int dirty_expire_interval = 30 * 100; /* sentiseconds */
+int dirty_expire_interval = 30 * HZ;
 
 /*
  * Flag that makes the machine dump writes/reads and block dirtyings.
@@ -770,9 +770,9 @@ static void wb_kupdate(unsigned long arg)
 
 	sync_supers();
 
-	oldest_jif = jiffies - msecs_to_jiffies(dirty_expire_interval);
+	oldest_jif = jiffies - dirty_expire_interval;
 	start_jif = jiffies;
-	next_jif = start_jif + msecs_to_jiffies(dirty_writeback_interval * 10);
+	next_jif = start_jif + dirty_writeback_interval;
 	nr_to_write = global_page_state(NR_FILE_DIRTY) +
 			global_page_state(NR_UNSTABLE_NFS) +
 			(inodes_stat.nr_inodes - inodes_stat.nr_unused);
@@ -801,10 +801,9 @@ static void wb_kupdate(unsigned long arg)
 int dirty_writeback_centisecs_handler(ctl_table *table, int write,
 	struct file *file, void __user *buffer, size_t *length, loff_t *ppos)
 {
-	proc_dointvec(table, write, file, buffer, length, ppos);
+	proc_dointvec_userhz_jiffies(table, write, file, buffer, length, ppos);
 	if (dirty_writeback_interval)
-		mod_timer(&wb_timer, jiffies +
-			msecs_to_jiffies(dirty_writeback_interval * 10));
+		mod_timer(&wb_timer, jiffies + dirty_writeback_interval);
 	else
 		del_timer(&wb_timer);
 	return 0;
@@ -906,8 +905,7 @@ void __init page_writeback_init(void)
 {
 	int shift;
 
-	mod_timer(&wb_timer,
-		  jiffies + msecs_to_jiffies(dirty_writeback_interval * 10));
+	mod_timer(&wb_timer, jiffies + dirty_writeback_interval);
 	writeback_set_ratelimit();
 	register_cpu_notifier(&ratelimit_nb);
 

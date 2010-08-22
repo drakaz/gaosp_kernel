@@ -12,14 +12,20 @@
 
 static int loadavg_proc_show(struct seq_file *m, void *v)
 {
-	unsigned long avnrun[3];
+	int a, b, c;
+	unsigned long seq;
 
-	get_avenrun(avnrun, FIXED_1/200, 0);
+	do {
+		seq = read_seqbegin(&xtime_lock);
+		a = avenrun[0] + (FIXED_1/200);
+		b = avenrun[1] + (FIXED_1/200);
+		c = avenrun[2] + (FIXED_1/200);
+	} while (read_seqretry(&xtime_lock, seq));
 
-	seq_printf(m, "%lu.%02lu %lu.%02lu %lu.%02lu %ld/%d %d\n",
-		LOAD_INT(avnrun[0]), LOAD_FRAC(avnrun[0]),
-		LOAD_INT(avnrun[1]), LOAD_FRAC(avnrun[1]),
-		LOAD_INT(avnrun[2]), LOAD_FRAC(avnrun[2]),
+	seq_printf(m, "%d.%02d %d.%02d %d.%02d %ld/%d %d\n",
+		LOAD_INT(a), LOAD_FRAC(a),
+		LOAD_INT(b), LOAD_FRAC(b),
+		LOAD_INT(c), LOAD_FRAC(c),
 		nr_running(), nr_threads,
 		task_active_pid_ns(current)->last_pid);
 	return 0;
