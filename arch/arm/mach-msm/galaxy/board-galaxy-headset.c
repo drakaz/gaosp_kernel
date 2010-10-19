@@ -154,7 +154,7 @@ static ssize_t h2w_print_name(struct switch_dev *sdev, char *buf)
 	case H2W_NO_DEVICE:
 		return sprintf(buf, "No Device\n");
 	case H2W_SEC_HEADSET:
-		return sprintf(buf, "H2W_SEC_HEADSET\n");
+		return sprintf(buf, "Headset\n");
 	case H2W_NORMAL_HEADSET:
 		return sprintf(buf, "H2W_NORMAL_HEADSET\n");
 	}
