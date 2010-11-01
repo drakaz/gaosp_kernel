@@ -29,8 +29,11 @@
 #ifdef CONFIG_USB_FUNCTION
 #include <linux/usb/mass_storage_function.h>
 #endif
-#ifdef CONFIG_USB_ANDROID
+#if defined(CONFIG_USB_ANDROID) || defined(CONFIG_USB_GADGET_MSM_72K)
 #include <linux/usb/android.h>
+#endif
+#ifdef CONFIG_USB_GADGET_MSM_72K
+#include <mach/rpc_hsusb.h>
 #endif
 
 #include <asm/mach/flash.h>
@@ -51,7 +54,8 @@ static char *df_serialno = "000000000000";
 #define HSUSB_API_PROG		0x30000064
 #define HSUSB_API_VERS MSM_RPC_VERS(1,1)
 
-#ifdef CONFIG_USB_FUNCTION
+
+#if defined(CONFIG_USB_FUNCTION) || defined(CONFIG_USB_GADGET_MSM_72K)
 static void hsusb_gpio_init(void)
 {
 	if (gpio_request(111, "ulpi_data_0"))
@@ -163,10 +167,12 @@ close:
 	msm_rpc_close(usb_ep);
 }
 
-#ifdef CONFIG_USB_FUNCTION
+#if defined(CONFIG_USB_FUNCTION) || defined(CONFIG_USB_GADGET_MSM_72K)
 static struct usb_mass_storage_platform_data usb_mass_storage_pdata = {
+#ifdef CONFIG_USB_FUNCTION
 	.nluns          = 0x02,
 	.buf_size       = 16384,
+#endif
 	.vendor         = "Samsung",
 	.product        = "SAMSUNG Android Mass storage",
 	.release        = 0x0100,
@@ -181,14 +187,14 @@ static struct platform_device mass_storage_device = {
 };
 #endif
 
-#ifdef CONFIG_USB_ANDROID
+#if defined(CONFIG_USB_ANDROID) || defined(CONFIG_USB_GADGET_MSM_72K)
 static void hsusb_phy_reset(void)
 {
 	msm_hsusb_phy_reset();
 }
 #endif
 
-#ifdef CONFIG_USB_ANDROID
+#if defined(CONFIG_USB_ANDROID) || defined(CONFIG_USB_GADGET_MSM_72K)
 static struct android_usb_platform_data android_usb_pdata = {
 	.vendor_id	= 0x04E8,
 	.product_id	= 0x6603,
@@ -282,7 +288,7 @@ static struct usb_composition usb_func_composition[] = {
 #endif
 
 static struct msm_hsusb_platform_data msm_hsusb_pdata = {
-#ifdef CONFIG_USB_ANDROID
+#if defined(CONFIG_USB_ANDROID) || defined(CONFIG_USB_GADGET_MSM_72K)
 	.phy_reset	= hsusb_phy_reset,
 #endif
 #ifdef CONFIG_USB_FUNCTION
@@ -312,8 +318,8 @@ void __init msm_add_usb_devices(void (*phy_reset) (void))
 	platform_device_register(&msm_device_hsusb_host);
 	platform_device_register(&msm_device_hsusb_otg);
 	platform_device_register(&mass_storage_device);
-
-#ifdef CONFIG_USB_ANDROID
+	
+#if defined(CONFIG_USB_ANDROID) || defined(CONFIG_USB_GADGET_MSM_72K)	
 	platform_device_register(&android_usb_device);
 #endif
 }
