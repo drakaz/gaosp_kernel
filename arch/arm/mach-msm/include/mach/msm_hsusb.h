@@ -50,7 +50,7 @@ struct usb_composition {
 
 struct msm_hsusb_platform_data {
 	__u16   version;
-#ifdef CONFIG_USB_ANDROID
+#if defined(CONFIG_USB_ANDROID) || defined(CONFIG_USB_GADGET_MSM_72K)
 	int *phy_init_seq;
 	void (*phy_reset)(void);
 #endif
