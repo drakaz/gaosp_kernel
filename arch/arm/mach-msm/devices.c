@@ -287,7 +287,7 @@ static struct resource resources_hsusb_peripheral[] = {
 };
 
 struct platform_device msm_device_hsusb_peripheral = {
-#ifdef CONFIG_USB_ANDROID
+#if defined(CONFIG_USB_ANDROID) || defined(CONFIG_USB_GADGET_MSM_72K)
 	.name		= "msm_hsusb",
 #else
 	.name		= "msm_hsusb_peripheral",
