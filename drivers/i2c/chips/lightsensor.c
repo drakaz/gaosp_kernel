@@ -14,7 +14,7 @@
 #include <linux/earlysuspend.h>
 #endif
 
-#define DEBUG 1
+#define DEBUG 0
 #define TIME_INT (2*HZ)  // 2 sec
 
 static struct workqueue_struct *lightsensor_wq;
