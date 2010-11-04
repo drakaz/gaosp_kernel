@@ -1712,6 +1712,7 @@ module_init(init);
 
 static void __exit cleanup(void)
 {
+	msm_hsusb_rpc_close();
 	platform_driver_unregister(&usb_driver);
 }
 module_exit(cleanup);
