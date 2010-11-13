@@ -1,659 +1,669 @@
-#include <linux/i2c.h>
-#include <linux/slab.h>
-#include <mach/gpio.h>
-#include <linux/miscdevice.h>
-#include <linux/delay.h>
+/* reference : drivers/input/misc/prox_sharp.c
+ *
+ * Sharp proximity driver
+ *
+ * Copyright (C) 2008 LGE, Inc.
+ *
+ * This software is licensed under the terms of the GNU General Public
+ * License version 2, as published by the Free Software Foundation, and
+ * may be copied, distributed, and modified under those terms.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ */
+#include <asm/uaccess.h>//add to test //diyu@lge.com
+#include <linux/module.h>
 #include <linux/input.h>
-#include <mach/vreg.h>
+#include <linux/i2c.h>
+#include <linux/miscdevice.h>
+#include <linux/interrupt.h>
+#include <linux/platform_device.h>
+#include <linux/hrtimer.h>
+#include <linux/mutex.h>
+#include <linux/ioctl.h>
 #include <asm/io.h>
-
-#include <linux/uaccess.h>
-
+#include <linux/delay.h>//LGE_CHANGE [diyu@lge.com]  //diyu@lge.com
+#include <asm/gpio.h>//LGE_CHANGE [diyu@lge.com]  //diyu@lge.com
+#include <mach/vreg.h> //LGE_CHANGE [diyu@lge.com] To set vreg
 #include <linux/wakelock.h>
 
-#include <linux/i2c/proximity.h>
+#define OBJECT_DETECTED		 1
+#define	OBJECT_NOT_DETECTED	0
 
-#define DEBUG 0
+#define MISC_DEV_NAME		"proximity" //"proxi-sensor"
+#define USE_IRQ				1
+#define GPIO_PROX_IRQ 		57 /*PROX_OUT*/
 
-static struct i2c_client *proximity_pclient;
+#define PROXIMITY_DEBUG 1
+#if PROXIMITY_DEBUG
+#define PDBG(fmt, args...) printk(fmt, ##args)
+#else
+#define PDBG(fmt, args...) do {} while (0)
+#endif /* PROXIMITY_DEBUG */
 
-static int opened;
-static int APP_STATE;
-///////////////////////////////////////static int pclk_set;
+static void *_dev = NULL;
 
-DECLARE_MUTEX(proximity);
-
-static struct workqueue_struct *proximity_wq;
-
-struct proximity_data {
+struct psensor_dev {
+	//struct sensors_dev *sensor;
 	struct i2c_client *client;
 	struct input_dev *input_dev;
-	struct work_struct  work;
+	struct list_head plist;
+	volatile int status;
+	volatile int ref_count;
 	int use_irq;
+	//wait_queue_head_t waitq;
+	struct work_struct work;
+	int irq;
 };
 
-static struct vreg *vreg_proximity;
+static struct workqueue_struct *proximity_wq;
+static atomic_t s_prox_sensor = ATOMIC_INIT(0);
+//static int prox_sensor_status = -1;
+static struct psensor_dev sharp_psensor;
+static int irq_set = 0; 
+static int proximity_near =-1; 
 
-static int global_value;
-static struct proximity_data *global_mt;
 
-static DECLARE_WAIT_QUEUE_HEAD(g_data_ready_wait_queue);
-
-static int proximity_i2c_write(unsigned char u_addr, unsigned char u_data);
-static int proximity_i2c_read(unsigned char u_addr, unsigned char *pu_data);
-static int proximity_remove(struct i2c_client *client);
-
-static void proximity_mt_work_func(struct work_struct *work);
-static irqreturn_t proximity_interrupt_handler(int irq, void *dev_id);
-extern void report_value_for_prx(int value);
-
-char proximity_outmod_reg;
-
-struct class *proximity_class;
-EXPORT_SYMBOL(proximity_class);
-
-struct device *switch_dev;
-EXPORT_SYMBOL(switch_dev);
-
-static struct wake_lock proximity_wakeup;
-
-int proximity_i2c_tx_data(char* txData, int length)
+int is_proxi_open(void)
 {
-	int rc;
-#if DEBUG
-	printk(KERN_INFO "[PROXIMITY] %s\n", __FUNCTION__);
-#endif
-
-	struct i2c_msg msg[] = {
-		{
-			.addr = proximity_pclient->addr,
-			.flags = 0,
-			.len = length,
-			.buf = txData,
-		},
-	};
-
-	rc = i2c_transfer(proximity_pclient->adapter, msg, 1);
-	if(rc < 0){
-		printk(KERN_ERR "proximity: proximity_i2c_tx_data error %d\n", rc);
-
-		return rc;
-		}
-	return 0;
+	PDBG("\n%s \n", __FUNCTION__);
+	return proximity_near;
 }
 
-static int proximity_i2c_write(unsigned char u_addr, unsigned char u_data)
+EXPORT_SYMBOL(is_proxi_open);
+
+
+static int gp2ap002_open(struct inode* inode, struct file* filp)
 {
-	int rc;
-	unsigned char buf[2];
-#if DEBUG
-	printk(KERN_INFO "[PROXIMITY] %s\n", __FUNCTION__);
-#endif
-
-	buf[0] = u_addr;
-	buf[1] = u_data;
-    
-	rc = proximity_i2c_tx_data(buf, 2);
-	if(rc < 0)
-		printk(KERN_ERR "proximity: txdata error %d add:0x%02x data:0x%02x\n",
-			rc, u_addr, u_data);
-	return rc;	
-}
-
-static int proximity_i2c_rx_data(char* rxData, int length)
-{
-    int rc;
- #if DEBUG
-	printk(KERN_INFO "[PROXIMITY] %s\n", __FUNCTION__);
-#endif
-
-    struct i2c_msg msgs[] = {
-        {
-            .addr = proximity_pclient->addr,
-            .flags = 1, //TEST      
-            .len = 2,
-            .buf = rxData,
-        },
-    };
- 
-    rc = i2c_transfer(proximity_pclient->adapter, msgs, 1);
- 
-    if (rc < 0) {
-        printk(KERN_ERR "proximity: proximity_i2c_rx_data error %d\n", rc);
-        return rc;
-    }
-return 0;
-}
-
-static int proximity_i2c_read(unsigned char u_addr, unsigned char *pu_data)
-{
-    int rc;
-    unsigned char buf[3];
- #if DEBUG
-	printk(KERN_INFO "[PROXIMITY] %s\n", __FUNCTION__);
-#endif
-
-    memset(buf, 0, sizeof(buf));
- 
-    buf[0] = u_addr;
- 
- 
-    rc = proximity_i2c_rx_data(&buf, 1);
- 
-	if (!rc)
-        *pu_data = buf[0] << 8 | buf[1];
-    else printk(KERN_ERR "proximity: i2c read failed\n");
-    return rc;
-
-
-}
-
-static void proximity_chip_init(void)
-{
-#if 1
-	printk(KERN_INFO "[PROXIMITY] %s\n", __FUNCTION__);
-#endif
-
-//	printk(KERN_INFO "proximity: init\n");
-	if (!proximity_pclient) 
-		return;
-
-      /* proximity init sequence */
-      
-	/* delay 2 ms */
-	msleep(2);
-//	printk(KERN_INFO "proximity sensor init sequence done\n");
-}
-
-static int proximity_open(struct inode *ip, struct file *fp)
-{
-	int rc = -EBUSY;
-#if 1
-	printk(KERN_INFO "[PROXIMITY] %s\n", __FUNCTION__);
-#endif
-	if (!opened) {
-//		printk(KERN_INFO "proximity: prevent collapse on idle\n");
-		rc = 0;
-	}
-	return rc;
-}
-
-static int proximity_on( void ) // To go back to operation
-{
-	uint16_t test_value= 0;
-	short value;
-
-#if 1
-	printk(KERN_INFO "[PROXIMITY] %s, APP_STATE = %d", __FUNCTION__,APP_STATE);
-#endif
-
-	if( !APP_STATE )
-		return printk("\n" );
-	
-	proximity_i2c_write(0x06, 0x18); // reg Symbol : CON -> force VOUT to go H
-	proximity_i2c_write(0x02, 0x40); // reg Symbol : HYS -> prepare VO reset to 0
-	proximity_i2c_write(0x04, 0x03); // reg Symbol : OPMOD -> release from shutdown
-
-    // permit host's interrupt input
-//	enable_irq(global_mt->client->irq);
-	enable_irq_wake(global_mt->client->irq);
-	
-	proximity_i2c_write(0x06, 0x00); // reg Symbol : CON -> force VOUT to go H
-	
-	printk(" : APP_STATE = %d\n", APP_STATE );
-
-	proximity_i2c_read(0x00, &test_value );
-	value = ( 0x01 & test_value ) ;
-	global_value = value;
-#if DEBUG
-	printk(KERN_INFO "[PROXIMITY] %s value = %d\n", __FUNCTION__,value);
-#endif
-	
-	return 0;
-}
-
-static int proximity_off( void ) // To go shutdown : not allowed interrupts
-{
-#if 1
-	printk(KERN_INFO "[PROXIMITY] %s", __FUNCTION__);
-#endif
-
-	// host's interrupt is made forbidden
-	
-//	disable_irq(global_mt->client->irq);
-	disable_irq_wake(global_mt->client->irq);
-	
-	proximity_i2c_write(0x04, 0x02); // reg Symbol : HYS -> Going back to operation
-
-	printk(" : APP_STATE = %d\n", APP_STATE );
-	return 0;
-}
-int proximity_get_value(void)
-{
-	return global_value;
-}
-static long proximity_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
-{
-	int rc = 0;
-	void __user *argp = (void __user *)arg;
-
-	switch(cmd) {
-		
-		case SHARP_GP2AP_OPEN: 
-        {
-			printk(KERN_INFO "[PROXIMITY] %s : case OPEN\n", __FUNCTION__);
-			APP_STATE = APP_OPEN;
-			proximity_on();	
-        }
-        break;    
-
-    	case SHARP_GP2AP_CLOSE: 
-        {
-			printk(KERN_INFO "[PROXIMITY] %s : case CLOSE\n", __FUNCTION__);
-			APP_STATE = APP_CLOSE;	
-			proximity_off();
-        }
-        break;    
-        
-    	default:
-        printk(KERN_INFO "[PROXIMITY] unknown ioctl %d\n", cmd);
-        break;
-	}
-	return rc;
-}
-
-int proximity_i2c_sensor_init(void){
-	
-	int i;
-	int rc=0;
-	uint16_t auto_value = 0;
-#if 1
-	printk(KERN_INFO "[PROXIMITY] %s\n", __FUNCTION__);
-#endif
-
-	vreg_set_level(vreg_proximity, 3000); // set to 3.0V voltage 
-	vreg_enable(vreg_proximity); // voltage 
-
-//=========== to set interrupt mode ============
-
-    proximity_i2c_write(0x01, 0x08); // reg Symbol : GAIN
-    proximity_i2c_write(0x02, 0x40); // reg Symbol : HYS 
-    proximity_i2c_write(0x03, 0x14); // reg symbol : CYCLE 32ms detection cycle
-//    proximity_i2c_write(0x03, 0x04); // reg symbol : CYCLE 8ms detection cycle 
-    proximity_i2c_write(0x04, 0x03); // reg symbol : OPMOD
-
-#if 0 // To Test when booting time
-	for(i=0; i<10 ; i++)
-    {
-        rc = proximity_i2c_read(0x00, &auto_value );
-        if(rc < 0)
-            printk("[PROXIMITY] proximity_i2c_read() fail\n");
- 
- 
-        printk("[PROXIMITY] proximity TEST : auto_value = %x", auto_value);
-        if( auto_value == 0xff)
-            printk(", detect\n");
-        else
-            printk(", undetect\n");
- 
-        mdelay(1000);
-    }
-#endif
+	sharp_psensor.ref_count++;
 
 	return 0;
 }
 
-
-static int proximity_init_client(struct i2c_client *client)
+static int gp2ap002_release(struct inode* inode, struct file* filp)
 {
-	/* Initialize the proximity Chip */
-	init_waitqueue_head(&g_data_ready_wait_queue);
-#if 1
-	printk(KERN_INFO "[PROXIMITY] %s\n", __FUNCTION__);
+	if (sharp_psensor.ref_count == 0) return 0;
+
+	sharp_psensor.ref_count--;
+
+	return 0;
+}
+#if 0  /*Not used*/
+static ssize_t gp2ap002_read(struct file *filp, char *buf, size_t count, loff_t *ofs)
+{
+	int size = sizeof(struct input_event);
+	struct input_event data;
+
+	do_gettimeofday(&data.time);
+	data.type = EV_ABS;
+	data.code = ABS_MISC;
+	data.value = sharp_psensor.status;
+
+	if (copy_to_user(buf, &data, size)) 
+		return -EFAULT;
+	else
+		return size;
+}
 #endif
+static int gp2ap002_ioctl(struct inode *inode, struct file *filp, 
+		unsigned int cmd, unsigned long arg)
+{
+	struct psensor_dev *dev = (struct psensor_dev *)_dev;
+	PDBG("\n\nCheck point : %s-1\n", __FUNCTION__);
+	
+	if (NULL == dev)
+		return -ENODEV;
 
 	return 0;
 }
 
-static struct file_operations proximity_fops = {
-        .owner 	= THIS_MODULE,
-        .open 	= proximity_open,
-//        .release = proximity_release,
-        .unlocked_ioctl = proximity_ioctl,
+/*
+static unsigned int gp2ap002_poll(struct file *filp, struct poll_table_struct *wait)
+{
+	poll_wait(filp, &sharp_psensor.waitq, wait);
+
+	return POLLIN;
+}
+*/
+/*
+static struct file_operations gp2ap002_fops = {
+	.owner 	= THIS_MODULE,
+	.open  	= gp2ap002_open,
+	.read	= gp2ap002_read,
+	//.poll	= gp2ap002_poll,
+	.release= gp2ap002_release,
 };
 
-static struct miscdevice proximity_device = {
-        .minor 	= MISC_DYNAMIC_MINOR,
-        .name 	= "proximity",
-        .fops 	= &proximity_fops,
-};
-
-static int proximity_probe(struct i2c_client *client)
-{
-	struct proximity_data *mt;
-	int err = 0;
-#if 1
-	printk(KERN_INFO "[PROXIMITY] %s\n", __FUNCTION__);
-#endif
-
-	uint16_t test_value = 0;
-	
-	if(!i2c_check_functionality(client->adapter, I2C_FUNC_I2C))
-		goto exit_check_functionality_failed;		
-	
-	if(!(mt = kzalloc( sizeof(struct proximity_data), GFP_KERNEL))) {
-		err = -ENOMEM;
-		goto exit_alloc_data_failed;
-	}
-
-
-	INIT_WORK(&mt->work, proximity_mt_work_func );
-	mt->client = client;
-    global_mt = mt;
-
-	i2c_set_clientdata(client, mt);
-
-	proximity_init_client(client);
-	proximity_pclient = client;
-	proximity_chip_init();
-	
-	/* Register a misc device */
-	err = misc_register(&proximity_device);
-	if(err) {
-		printk(KERN_ERR "proximity_probe: misc_register failed \n");
-		goto exit_misc_device_register_failed;
-	}
-
- 	mt->input_dev = input_allocate_device();
-	if (mt->input_dev == NULL) {
-		err = -ENOMEM;
-		printk(KERN_ERR "proximity_probe: Failed to allocate input device\n");
-		goto err_input_dev_alloc_failed;
-	}
-
-	mt->input_dev->name = "proximity_i2c";
-
-
-	err = input_register_device(mt->input_dev);
-	if (err) {
-		printk(KERN_ERR "proximity_probe: Unable to register %s input device\n", mt->input_dev->name);
-		goto err_input_register_device_failed;
-	}
-
-	proximity_i2c_sensor_init();
-
-/* proximity/lightsensor i2c TEST */
-	if ( proximity_i2c_read(0x00, &test_value ) < 0 ) {
-		printk("proximity_i2c fail!! proximity/lightsensor wont be probed.\n");
-		goto exit_check_functionality_failed;		
-	}
-
-	printk("[PROXIMITY] TEST_value = %x\n", test_value);
-	
-	/* [PROXIMITY] Edited for registration of irq by CHJ - START */
-	err = gpio_configure( 57, GPIOF_INPUT | IRQF_TRIGGER_FALLING );
-	if(err)
-		printk(KERN_ERR "gpio_request err\n");
-
-//	printk("[PROXIMITY] try to register interrupt\n");
-	if(request_irq( client->irq, proximity_interrupt_handler, IRQF_TRIGGER_FALLING, "proximity_i2c", mt )) 
-	{
-		free_irq(client->irq, NULL);
-		printk("[error] proximity_interrupt_handler can't register the handler! and passing....\n");
-	}
-	enable_irq_wake( client->irq );
-
-	/* [PROXIMITY] Edited for registration of irq by CHJ - END */
-	
-	proximity_off( );
-	APP_STATE = APP_CLOSE;
-
-#if 0 // to TEST
-	printk(KERN_INFO "[PROXIMITY] TEST start!\n");
-	proximity_on( );
-#endif
-
-	wake_lock_init(&proximity_wakeup, WAKE_LOCK_SUSPEND, "proximity_wakeups");
-
-	printk(KERN_INFO "[PROXIMITY] proximity_probe END!\n");
-
-	return 0;
-		
-exit_misc_device_register_failed:
-exit_alloc_data_failed:
-exit_check_functionality_failed:
-err_input_register_device_failed:
-err_input_dev_alloc_failed:
-
-
-	return err;
-}
-
-static int proximity_remove(struct i2c_client *client)
-{
-	struct proximity_data *mt = i2c_get_clientdata(client);
-#if 1
-	printk(KERN_INFO "[PROXIMITY] %s\n", __FUNCTION__);
-#endif
-
-	free_irq(client->irq, mt);
-	i2c_detach_client(client);
-	proximity_pclient = NULL;
-	misc_deregister(&proximity_device);
-	kfree(mt);
-	return 0;
-}
-
-static void proximity_mt_work_func(struct work_struct *work)
-{
-	struct proximity_data *mt = container_of(work, struct proximity_data, work);
-	
-	uint16_t test_value= 0;
-	short value;
-	
-	wake_lock_timeout(&proximity_wakeup, 2*HZ);  // mjLee
-
-//	Procedure 5
-	proximity_i2c_read(0x00, &test_value );
-	value = ( 0x01 & test_value ) ;
-
-	global_value = value;
-	printk(KERN_INFO "[PROXIMITY] %s : value = %d\n", __FUNCTION__,value);
-	report_value_for_prx( value );
-
-/* To Report values to HAL
-	input_report_abs(mt->input_dev, ???? , value );
 */
 
-//	Procedure 6
-	if( value == 0 ) // VO=0 : no detection
-	{
-		proximity_i2c_write(0x02, 0x40); // reg Symbol : HYS for Mode. B1 
-//		proximity_i2c_write(0x02, 0x20); // reg Symbol : HYS for Mode. B2 
-	}
-	else if(value == 1) // VO=1 : detection
-	{
-		proximity_i2c_write(0x02, 0x23); // reg Symbol : HYS for Mode. B1 
-//		proximity_i2c_write(0x02, 0x20); // reg Symbol : HYS for Mode. B1 - original
-//		proximity_i2c_write(0x02, 0x00); // reg Symbol : HYS for Mode. B2 
-	}
-	else
-		printk("VO is error.\n");
-	msleep(500);
 
-//	Procedure 7
-	proximity_i2c_write(0x06, 0x18); // reg Symbol : CON, disable VOUT terminal
-//	Procedure 8
-	enable_irq(mt->client->irq);
-//	enable_irq_wake(mt->client->irq);
-//	Procedure 9
-	proximity_i2c_write(0x06, 0x0); // reg Symbol : CON, enable VOUT terminal
-}
-
-static irqreturn_t proximity_interrupt_handler(int irq, void *dev_id)
-{
-	struct proximity_data *mt = dev_id;
-#if DEBUG
-	printk(KERN_INFO "[PROXIMITY] %s\n", __FUNCTION__);
-#endif
-
-//	Procedure 4
-	disable_irq(mt->client->irq);
-//	disable_irq_wake(mt->client->irq);
-	
-	queue_work(proximity_wq, &mt->work);	
-
-	return IRQ_HANDLED;
-} 
-
-static int proximity_resume(struct i2c_client *client)
-{
-#if DEBUG
-	printk(KERN_INFO "[PROXIMITY] %s\n", __FUNCTION__);
-#endif
-	
-	if( APP_STATE == APP_CLOSE ){
-		vreg_enable(vreg_proximity);
-	}	
-	
-	return 0;
-}
-
-static int proximity_suspend(struct i2c_client *client, pm_message_t mesg)
-{
-#if DEBUG
-	printk(KERN_INFO "[PROXIMITY] %s\n", __FUNCTION__);
-#endif
-	
-	if( APP_STATE == APP_CLOSE ){
-		vreg_disable(vreg_proximity);
-	}	
-	
-	return 0;
-}
-static const struct i2c_device_id proximity_id[] = {
-	{ "proximity_i2c", 0 },
-	{ }
+/* use miscdevice for ioctls */
+static struct file_operations gp2ap002_fops = {
+	.owner   = THIS_MODULE,
+	.open    = gp2ap002_open,
+	.release = gp2ap002_release,
+	.ioctl   = gp2ap002_ioctl,
 };
 
-MODULE_DEVICE_TABLE(i2c, proximity_id);
-
-
-static struct i2c_driver proximity_driver = {
-	.id_table	= proximity_id,
-	.probe = proximity_probe,
-	.remove = proximity_remove,
-	.suspend = proximity_suspend,
-	.resume  = proximity_resume,
-
-	.driver = {		
-		.name   = "proximity_i2c",
-	},
+static struct miscdevice gp2ap002_dev = {
+	.minor = MISC_DYNAMIC_MINOR,
+	.name  = MISC_DEV_NAME,
+	.fops  = &gp2ap002_fops,
 };
 
-static ssize_t proximity_file_data_show(struct device *dev, struct device_attribute *attr, char *buf)
-{
-#if DEBUG
-	printk(KERN_INFO "[PROXIMITY] %s\n", __FUNCTION__);
-#endif
+/* 
+ * Sharp Proximity Sensor Interface 
+ * */
+#define PROX_REG	0
+#define GAIN_REG	1
+#define HYS_REG		2
+	#define HYS_MODE_A		0xC2
+	#define HYS_MODE_B1_VO0	0x40
+	#define HYS_MODE_B1_VO1	0x20
+	#define	HYS_MODE_B2_VO0	0x20
+	#define HYS_MODE_B2_VO1	0x00
+#define CYCLE_REG	3
+#define	OPMOD_REG	4
+	#define OPMODE_POWER_ON			(1 << 0)
+	#define	OPMODE_INTR_MODE		(1 << 1)
+	#define OPMODE_OPERTATING_MODE  0x01
+		#define OPMODE_NORMAL_MODE  0x01
+		#define OPMODE_INTERRUPT_MODE  0x03
+	#define OPMODE_SHUTDONW_MODE  0x00
+	
+	
+#define	CON_REG		6
+	#define	CON_VOUT_ENABLE		0x00
+	#define CON_VOUT_DISABLE	0x18
 
-	return sprintf(buf, "%d\n", global_value);
+#define PROX_I2C_INT_NO_CLEAR	0
+//#define PROX_I2C_INT_NO_CLEAR	0
+
+#define	PROX_I2C_INT_CLEAR		0x80
+
+//int prox_i2c_write( u8 addr, u8 value, u8 intr_clr)
+
+int prox_i2c_write(struct i2c_client *client, u8 addr, u8 value, u8 intr_clr)
+{
+	sharp_psensor.client = client;
+	return i2c_smbus_write_byte_data(client, addr | intr_clr, value);
+	//	return i2c_smbus_write_byte_data(sharp_psensor.client, addr | intr_clr, value);
+	
 }
 
-static ssize_t proximity_file_data_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t size)
+int prox_i2c_read(struct i2c_client *client, u8 addr, u8 intr_clr)
 {
-	int ret = 0;
-#if DEBUG
-	printk(KERN_INFO "[PROXIMITY] %s : operate nothing\n", __FUNCTION__);
-#endif
+	int ret;
 
+	client->flags |= I2C_M_RD; //I2C_M_RDW 
+	ret = i2c_smbus_read_byte_data(client, addr | intr_clr);
+	client->flags &=~I2C_M_RD; //I2C_M_RDW 
 
 	return ret;
 }
-static ssize_t proximity_file_cmd_show(struct device *dev, struct device_attribute *attr, char *buf)
-{
-	int value;
-#if DEBUG
-	printk(KERN_INFO "[PROXIMITY] %s : operate nothing\n", __FUNCTION__);
-#endif
 
-	return sprintf(buf, "%d\n", value);
+static int prox_vreg_set(int onoff)
+{
+	struct vreg *vreg_proximity;
+	int rc = -1;
+
+	//START: proximity sensor  2.8v setting
+	vreg_proximity = vreg_get(0, "gp6");
+	if (onoff)
+	{
+		vreg_enable(vreg_proximity);
+		rc = vreg_set_level(vreg_proximity, 2800);
+	}
+	else
+	{
+		rc = vreg_disable(vreg_proximity);
+	}
+	if (rc != 0) {
+		printk("diyu vreg_proximity failed(err:%d)\n", rc);
+		return -1;
+	}
+//END: proximity sensor  2.8v setting
+	return rc;
 }
 
-static ssize_t proximity_file_cmd_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t size)
+static int sharp_psensor_init(struct i2c_client *client)
 {
-	int ret = 0;
-	char *after;
-
-	unsigned long value = simple_strtoul(buf, &after, 10);	
-#if DEBUG
-	printk(KERN_INFO "[PROXIMITY] %s\n", __FUNCTION__);
-#endif
-		
-		if (value)
-		{
-			printk("[%s] CMD 1\n", __func__);
-			APP_STATE = APP_OPEN;
-			proximity_on();
-	    }		
-		else	
-		{
-			printk("[%s] CMD 0\n", __func__);
-			APP_STATE = APP_CLOSE;
-			proximity_off();
-		}
+	//struct i2c_client *client = sharp_psensor.client;
+	int ret;
 	
+	PDBG("diyu %s\n","sharp_psensor_init");
 
+#if 1
+		ret = prox_i2c_write(client, GAIN_REG, 0x08, PROX_I2C_INT_NO_CLEAR);
+		ret = prox_i2c_write(client, HYS_REG, HYS_MODE_A,  PROX_I2C_INT_NO_CLEAR);
+		ret = prox_i2c_write(client, CYCLE_REG, 0x04, PROX_I2C_INT_NO_CLEAR);
+		ret = prox_i2c_write(client, OPMOD_REG, OPMODE_NORMAL_MODE, PROX_I2C_INT_NO_CLEAR);
+//		ret = prox_i2c_write(client, OPMOD_REG, OPMODE_INTERRUPT_MODE, PROX_I2C_INT_NO_CLEAR);
+#else
+//	prox_i2c_write(CON_REG, CON_VOUT_DISABLE, PROX_I2C_INT_NO_CLEAR);
+	prox_i2c_write(GAIN_REG, 0x08, PROX_I2C_INT_NO_CLEAR);
+	//prox_i2c_write(HYS_REG, HYS_MODE_A,  PROX_I2C_INT_NO_CLEAR);
+	prox_i2c_write(HYS_REG, 0x40,  PROX_I2C_INT_NO_CLEAR);
+	prox_i2c_write(CYCLE_REG, 0x04, PROX_I2C_INT_NO_CLEAR);
+	//prox_i2c_write(HYS_REG, HYS_MODE_B1_VO0,  PROX_I2C_INT_NO_CLEAR);
+	prox_i2c_write(OPMOD_REG, 0x03, PROX_I2C_INT_NO_CLEAR);
+#endif
+	//sharp_psensor_on();
+	prox_i2c_write(client, CON_REG, CON_VOUT_ENABLE, PROX_I2C_INT_NO_CLEAR);
+
+ 	return ret;
+}
+
+static void gp2ap002_work_func(struct work_struct *work)
+{
+	struct psensor_dev *dev = container_of(work, struct psensor_dev, work);
+
+	int do_report = 1, report_value;
+	PDBG("%s()\n",__FUNCTION__);
+
+	if(gpio_get_value(GPIO_PROX_IRQ) == 1){
+		report_value = 1;
+		if (do_report) {
+			proximity_near = 1; /*NEAR ?*/
+			input_report_abs(dev->input_dev, ABS_DISTANCE, report_value );
+			input_sync(dev->input_dev);
+		}
+	}else{
+		report_value = 0;
+		if (do_report) {
+			proximity_near = 0; /*FAR AWAY ?*/
+			input_report_abs(dev->input_dev, ABS_DISTANCE, report_value );
+			input_sync(dev->input_dev);
+		}
+	}
+}
+
+
+void sharp_psensor_on(void)
+{
+	prox_i2c_write(sharp_psensor.client, OPMOD_REG, OPMODE_POWER_ON, PROX_I2C_INT_NO_CLEAR);
+	sharp_psensor_init(sharp_psensor.client);
+	printk("diyu %s\n","sharp_psensor_on" );
+}
+
+void sharp_psensor_off(void)
+{
+	prox_i2c_write(sharp_psensor.client, OPMOD_REG, OPMODE_INTR_MODE, PROX_I2C_INT_NO_CLEAR);	
+	prox_i2c_write(sharp_psensor.client, OPMOD_REG, 0, PROX_I2C_INT_NO_CLEAR);	
+	//prox_i2c_write(sharp_psensor.client, OPMOD_REG, 0, PROX_I2C_INT_NO_CLEAR);	
+	
+	printk("diyu %s\n","sharp_psensor_off" );
+}
+
+int sharp_psensor_read(void)
+{
+	return prox_i2c_read(sharp_psensor.client, PROX_REG, PROX_I2C_INT_CLEAR);
+	
+	printk("diyu %s\n","sharp_psensor_read" );
+
+}
+
+/*
+ *	system filesystem 
+ **/
+#if 0 /*Not use*//*CONFIG_SYSFS*/
+static ssize_t sharp_gp2ap002_switch(struct device *dev, const char *buf, size_t count)
+{
+	char sen_switch[8];
+
+	sscanf(buf, "%4s", sen_switch);
+	printk(KERN_INFO"%s\n", sen_switch);
+
+	if (strncmp(sen_switch, "on", 2) == 0) {
+		PDBG(KERN_INFO"sharp_psensor_on\n");
+		sharp_psensor_on();
+	}
+	else if (strncmp(sen_switch, "off", 3) == 0) {
+		PDBG(KERN_INFO"sharp_psensor_off\n");
+		sharp_psensor_off();
+	}
+
+	return count;
+}
+
+static ssize_t sharp_gp2ap002_interval(struct device *dev, const char *buf, size_t count)
+{
+	char sen_switch[8];
+
+	sscanf(buf, "%4s", sen_switch);
+	printk(KERN_INFO"%s\n", sen_switch);
+
+	if (strncmp(sen_switch, "read", 1) == 0) 
+		PDBG("[0x00] = %x\n", sharp_psensor_read());
+	else if (strncmp(sen_switch, "high", 1) == 0)
+		prox_i2c_write(sharp_psensor.client, CON_REG, CON_VOUT_DISABLE, PROX_I2C_INT_NO_CLEAR);
+	else if (strncmp(sen_switch, "low", 1) == 0)
+		prox_i2c_write(sharp_psensor.client, CON_REG, CON_VOUT_ENABLE, PROX_I2C_INT_NO_CLEAR);
+
+
+
+	return count;
+}
+
+static DEVICE_ATTR(switch, (S_IRUSR|S_IWUSR), NULL, sharp_gp2ap002_switch);
+static DEVICE_ATTR(interval, (S_IRUSR|S_IWUSR), NULL, sharp_gp2ap002_interval);
+
+static struct attribute* psensor_attr[] = {
+	&dev_attr_switch,
+	&dev_attr_interval,
+	NULL
+};
+
+static struct attribute_group psensor_attr_group = {
+	.attrs = psensor_attr
+};
+#endif
+
+static ssize_t sharp_gp2ap002_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	int prox_gpio_state;
+	prox_gpio_state =  proximity_near;
+//	prox_gpio_state = (float)gpio_get_value(GPIO_PROX_IRQ);
+	
+	return sprintf(buf, "%d\n", prox_gpio_state );
+}
+
+static ssize_t sharp_gp2ap002_enable_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%d\n", s_prox_sensor); //irq_set);
+}
+
+static ssize_t sharp_gp2ap002_enable_store(
+		struct device *dev, struct device_attribute *attr, 
+		const char *buf, size_t size)
+{
+	struct psensor_dev *pdev = _dev;
+	int value;
+	int ret=0;
+	sscanf(buf, "%d", &value);
+
+	atomic_set(&s_prox_sensor, value);
+
+	/*  value == 0  : stop hall ic_irq_wake	 
+	 *    value ==1  : start hall ic_irq_wake
+	       value ==   :  */
+
+	printk(KERN_ERR "\n[PROX] %s(old: %d, new: %d)\n", __FUNCTION__, irq_set, value);
+    if(value == irq_set)
+      return size; /* nothing to do */
+
+	if(value ==1 ) {
+		irq_set = 1;
+		prox_vreg_set(1);
+		udelay(100);
+		ret = sharp_psensor_init(pdev->client);
+		PDBG("set_irq_wake on \n");
+	}else if(value == 0){
+		irq_set = 0;	
+		prox_vreg_set(0);
+		PDBG("set_irq_wake off \n"); 
+		
+	}
+
+	if(irq_set == 1){
+		enable_irq(gpio_to_irq(GPIO_PROX_IRQ));
+		set_irq_wake(gpio_to_irq(GPIO_PROX_IRQ), irq_set);
+	}else if(irq_set == 0){
+		disable_irq(gpio_to_irq(GPIO_PROX_IRQ));
+		set_irq_wake(gpio_to_irq(GPIO_PROX_IRQ), irq_set);
+	}
+		
+	
+	
 	return size;
 }
 
-static DEVICE_ATTR(proximity_file_data, S_IRUGO | S_IWUSR | S_IWOTH | S_IXOTH, proximity_file_data_show, proximity_file_data_store);
-static DEVICE_ATTR(proximity_file_cmd, S_IRUGO | S_IWUSR | S_IWOTH | S_IXOTH, proximity_file_cmd_show, proximity_file_cmd_store);
+static DEVICE_ATTR(show, S_IRUGO | S_IWUSR, sharp_gp2ap002_show, NULL);
 
-static int __init proximity_init(void)
+static DEVICE_ATTR(enable, S_IRUGO | S_IWUGO, sharp_gp2ap002_enable_show, sharp_gp2ap002_enable_store);
+
+/*
+ * interrupt service routine
+ */
+static int gp2ap002_interrupt(int irq, void *dev_id)
 {
-	printk(KERN_INFO "===== [PROXIMITY] proximity sensor driver =====\n");
-	printk("[PROXIMITY] __init proximity_init \n");
+	struct psensor_dev *pdev = dev_id;
 	
-	proximity_wq= create_singlethread_workqueue("proximity_wq");
-	if (!proximity_wq)
-		return -ENOMEM; 
-	
-	vreg_proximity = vreg_get(0, "gp6");
-	i2c_add_driver(&proximity_driver);
-	if (IS_ERR(vreg_proximity))
-	{	
-		printk("===== [PROXIMITY] proximity IS_ERR TEST =====\n");
-		return PTR_ERR(vreg_proximity);
+	if(irq_set == 1 ){
+		PDBG("diyu/yong 11p = %d\n", sharp_psensor.status);
+		//disable_irq(pdev->client->irq);
+		sharp_psensor.status = !sharp_psensor.status; 
+		PDBG("diyu  proximity-interrupt  = %d\n", sharp_psensor.status);
+		queue_work(proximity_wq, &pdev->work);
+		//enable_irq(pdev->client->irq);
+	}else{
+		printk("diyu/yong p = %d disable \n", sharp_psensor.status);
+		//disable_irq(pdev->client->irq);
 	}
 
-	proximity_class = class_create(THIS_MODULE, "proximity");
-	if (IS_ERR(proximity_class))
-		pr_err("Failed to create class(sec)!\n");
+	return IRQ_HANDLED;
+}
 
-	switch_dev = device_create(proximity_class, NULL, 0, NULL, "switch");
-	if (IS_ERR(switch_dev))
-		pr_err("Failed to create device(switch)!\n");
+static int gp2ap002_suspend(struct i2c_client *client, pm_message_t mesg)
+{
+	int ret=0;
+	struct psensor_dev *pdev = _dev;
+	
+	/* future capability*/
+	PDBG("diyu/yong [%s] \n", __FUNCTION__);
+	ret = cancel_work_sync(&pdev->work);
+	if (ret != 0) {
+		printk("diyu vreg_proximity failed\n");
+		return -1;
+	}
+	return 0;
+}
 
-	if (device_create_file(switch_dev, &dev_attr_proximity_file_data) < 0)
-		pr_err("Failed to create device file(%s)!\n", dev_attr_proximity_file_data.attr.name);
-	if (device_create_file(switch_dev, &dev_attr_proximity_file_cmd) < 0)
-		pr_err("Failed to create device file(%s)!\n", dev_attr_proximity_file_cmd.attr.name);
+static int gp2ap002_resume(struct i2c_client *client)
+{
+	//int ret=0;
+	//struct psensor_dev *pdev = _dev;
+	
+	/* future capability*/
+	PDBG("diyu/yong [%s] \n", __FUNCTION__);
 
 	return 0;
 }
 
-static void __exit proximity_exit(void)
+static int gp2ap002_probe(struct i2c_client *client,
+			const struct i2c_device_id *dev_id)
 {
-	i2c_del_driver(&proximity_driver);
+	struct psensor_dev *pdev; /*= &sharp_psensor;*/
+	struct input_dev *input_dev;
+	int ret;
+				
+	PDBG("diyu/yong [dist test] gp2ap002_probe addr = 0x%x\n", client->addr);
+
+	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
+			dev_err(&client->dev, "need I2C_FUNC_I2C\n");
+			ret = -ENODEV;
+			//goto err_check_functionality;
+	}
+	
+	pdev = kzalloc(sizeof(struct psensor_dev), GFP_KERNEL);
+	if (NULL == pdev) {
+		ret = -ENOMEM;
+		//goto err_alloc_data;
+	}
+	_dev = pdev; /* for miscdevice */
+
+	pdev->client = client;
+	sharp_psensor.client = client;
+	pdev->use_irq = USE_IRQ;
+//	pdev->sensor = &gp2ap002_dev;
+	INIT_LIST_HEAD(&pdev->plist);
+	pdev->status = OBJECT_NOT_DETECTED;
+	pdev->ref_count = 0;
+	i2c_set_clientdata(client, pdev);
+	atomic_set(&s_prox_sensor, -1);
+//	s_prox_sensor = 0;
+	INIT_WORK(&pdev->work, gp2ap002_work_func);
+
+#if 0
+	ret = sharp_psensor_init(client);
+	//ret = sharp_psensor_init();
+	if(ret) 
+		printk("Error proximity initializaton\n");
+#endif	
+	
+	ret = misc_register(&gp2ap002_dev);
+	if (ret) {
+		dev_err(&client->dev, "failed to register miscdevice\n");
+		//goto err_miscdevice;
+	}
+	
+	pdev->input_dev = input_allocate_device();
+	if (NULL == pdev->input_dev) {
+		ret = -ENOMEM;
+		dev_err(&client->dev, "failed to allocate input device\n");
+		//goto err_input_allocate_device;
+	}
+
+	input_dev = pdev->input_dev;
+	input_dev->name = "proximity";
+	input_dev->phys = "proximity/input0";
+	//input_dev->id.bustype = BUS_HOST;
+	//input_dev->id.vendor = 0x0001;
+	//input_dev->id.product = 0x0002;
+	//input_dev->id.version = 0x0100;
+	
+	set_bit(EV_SYN, input_dev->evbit); //for sync
+	set_bit(EV_ABS, input_dev->evbit);
+//	set_bit(EV_DISTANCE, input_dev->evbit); // value of distance in proximity sensor
+	input_set_abs_params(input_dev, ABS_DISTANCE, 0/*MIN*/, 1/*MIN*/, 0, 0);
+
+	ret = input_register_device(input_dev);
+
+	if (ret) {
+		printk(KERN_ERR"sharp psensor unable to register device. %d\n", ret);
+		//goto err_input_register_device;
+	}
+
+	PDBG ("diyu  client->irq : %d \n",client->irq ); 
+	PDBG ("diyu  pdev->client->irq : %d \n",pdev->client->irq ); 
+	//pdev->irq = gpio_direction_input(client->irq);
+	PDBG ("diyu  client->irq : %d \n",pdev->irq ); 
+	
+	pdev->irq = client->irq;
+
+	ret = request_irq(/*pdev->client->irq*/gpio_to_irq(GPIO_PROX_IRQ), gp2ap002_interrupt,  IRQF_TRIGGER_FALLING | IRQF_TRIGGER_RISING, 
+		"proximity", pdev);
+	if (ret) {
+		printk(KERN_ERR"sharp psensor request irq error !!\n");
+		free_irq(pdev->irq, NULL);
+		return ret;
+	}
+
+#if 1  /* initialize for function "sharp_gp2ap002_enable_store"*/
+	irq_set = 0 ;
+	disable_irq(gpio_to_irq(GPIO_PROX_IRQ));
+
+#endif 
+	ret = sharp_psensor_init(client);
+	udelay(100);
+	prox_vreg_set(0);
+
+#if 1
+	ret = device_create_file(&client->dev, &dev_attr_enable);
+	if (ret) {
+		printk( "android-proximity: device_create_fail : Fail\n");
+		device_remove_file(&client->dev, &dev_attr_enable);
+		//goto err_request_irq;
+	}
+
+	ret = device_create_file(&client->dev, &dev_attr_show);
+	if (ret) {
+		printk( "android-proximity: device_create_fail : Fail\n");
+		device_remove_file(&client->dev, &dev_attr_show);
+		//goto err_request_irq;
+	}
+#endif
+
+#ifdef CONFIG_SYSFS
+/*
+	ret = sysfs_create_group(&client->dev.kobj, &psensor_attr_group);
+	if (ret) {
+		printk(KERN_INFO"psensor create sysfs file  failed!\n");
+		return ret;
+	}
+*/
+#endif
+
+	return 0;
 }
 
-//EXPORT_SYMBOL(proximity_suspend);
-//EXPORT_SYMBOL(proximity_resume);
+static int gp2ap002_remove(struct i2c_client *client)
+{
+	struct psensor_dev *pdev = &sharp_psensor;
 
-module_init(proximity_init);
-module_exit(proximity_exit);
+	free_irq(pdev->irq, NULL);
+#ifdef CONFIG_SYSFS
+/*
+	sysfs_remove_group(&client->dev.kobj, &psensor_attr_group);
+*/
+#endif
+	input_unregister_device(pdev->input_dev);
+	input_free_device(pdev->input_dev);
+	misc_deregister(&gp2ap002_dev);
+	kfree(pdev);
+	
+	return 0;
+}
 
-MODULE_AUTHOR("");
-MODULE_DESCRIPTION("Proximity Sensor Driver");
+static struct i2c_device_id gp2ap002_idtable[] = {
+        { "proximity_i2c", 1 },
+};
+
+static struct i2c_driver i2c_gp2ap002_driver = {
+	.driver = {
+			.name = "proximity_i2c"
+		},
+	.probe 	= gp2ap002_probe,
+	.remove = __devexit_p(gp2ap002_remove),
+	.id_table 	= gp2ap002_idtable,
+#ifdef CONFIG_PM
+	.suspend	= gp2ap002_suspend,
+	.resume 	= gp2ap002_resume,
+#endif
+};
+
+static int gp2ap002_init(void)
+{
+	int ret;
+	PDBG("diyu/yong gp2ap002_init\n");
+
+	proximity_wq = create_singlethread_workqueue("proximity_wq");
+	if (!proximity_wq)
+		return -ENOMEM;
+	
+
+	ret = i2c_add_driver(&i2c_gp2ap002_driver);
+	if (ret) {
+		printk(KERN_ERR"SHARP GP2AP002 : Proximity Sensor Driver Registeration Failed!!\n");
+		return ret;
+	}
+
+	return 0;
+}
+
+static void gp2ap002_exit(void)
+{
+	i2c_del_driver(&i2c_gp2ap002_driver);
+	if (proximity_wq)
+		destroy_workqueue(proximity_wq);
+}
+
+module_init(gp2ap002_init);
+module_exit(gp2ap002_exit);
+
+MODULE_DESCRIPTION("Sharp Proximity Sensor Driver(gp2ap002)");
+MODULE_AUTHOR("Dae il, yu <diyu@lge.com>");
 MODULE_LICENSE("GPL");
