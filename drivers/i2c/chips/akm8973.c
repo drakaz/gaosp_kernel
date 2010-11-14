@@ -407,7 +407,7 @@ static void AKECS_Report_Value(short *rbuf)
 	}*/
   if(atomic_read(&p_flag)){
     /* Proximity driver return 0 when something is in front of the sensor */
-    rbuf[12]=!is_proxi_open();
+    rbuf[12]=is_proxi_open() ? 0 : 1;
     input_report_abs(data->input_dev, ABS_DISTANCE, rbuf[12]);
   }
 	
