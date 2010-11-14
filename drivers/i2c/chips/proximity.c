@@ -37,7 +37,7 @@
 #define USE_IRQ				1
 #define GPIO_PROX_IRQ 		57 /*PROX_OUT*/
 
-#define PROXIMITY_DEBUG 1
+#define PROXIMITY_DEBUG 0
 #if PROXIMITY_DEBUG
 #define PDBG(fmt, args...) printk(fmt, ##args)
 #else
