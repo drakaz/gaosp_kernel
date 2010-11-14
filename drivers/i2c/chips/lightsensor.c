@@ -8,6 +8,8 @@
 #include <linux/time.h>
 #include <linux/timer.h>
 
+#include <linux/i2c/lightsensor.h>
+
 #define suspend_test 1   // 1 is suspend, 0 is early_suspend
 
 #ifndef suspend_test //def CONFIG_HAS_EARLYSUSPEND
@@ -56,6 +58,8 @@ EXPORT_SYMBOL(lightsensor_low_battery_flag_set);
 int get_lightsensor_level( void );
 EXPORT_SYMBOL(get_lightsensor_level);
 
+int get_lightsensor_raw_level( void );
+
 void lightsensor_registertimer(struct timer_list* ptimer, unsigned long timeover )
 {
 	init_timer( ptimer );
@@ -96,9 +100,21 @@ int get_lightsensor_level( void )
 		present_level = 22;
 
 	previous_level=present_level;
-	printk("[LIGHTSENSOR] get_lightsensor_level = %d\n", present_level );	
-	
-	return present_level;	
+	printk("[LIGHTSENSOR] get_lightsensor_level = %d\n", present_level );
+	return present_level;
+}
+
+int get_lightsensor_light( void )
+{
+	uint32_t raw_data = 0;
+	int test_value=0;
+
+	msm_proc_comm(PCOM_CUSTOMER_CMD2, &raw_data, 0);
+	test_value = raw_data;
+
+	printk("[LIGHTSENSOR] get_lightsensor_light = %d\n", test_value);	
+
+	return test_value;	
 }
 
 void lightsensor_low_battery_flag_set( int flag )
@@ -178,7 +194,7 @@ static void lightsensor_work_func(struct work_struct *work)
 		cnt =0;
 		previous_value = present_value;
 	}
-	return ;	
+	return ;
 }
 
 static void lightsensor_set_lcd_initial_brightness( void )

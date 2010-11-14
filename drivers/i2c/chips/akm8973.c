@@ -28,6 +28,7 @@
 #include <linux/i2c/akm8973.h>
 
 #include <linux/i2c/proximity.h>
+#include <linux/i2c/lightsensor.h>
 #include <linux/earlysuspend.h>
 
 #define DEBUG 0
@@ -63,6 +64,7 @@ static atomic_t a_flag;
 static atomic_t t_flag;
 static atomic_t mv_flag;
 static atomic_t p_flag;
+static atomic_t l_flag;
 //static int failure_count = 0;
 
 static short akmd_delay = 0;
@@ -410,8 +412,14 @@ static void AKECS_Report_Value(short *rbuf)
     rbuf[12]=is_proxi_open() ? 0 : 1;
     input_report_abs(data->input_dev, ABS_DISTANCE, rbuf[12]);
   }
-	
-	input_sync(data->input_dev);
+
+  if(atomic_read(&l_flag)){
+    /* Proximity driver return 0 when something is in front of the sensor */
+    rbuf[13]=get_lightsensor_light();
+    input_report_abs(data->input_dev, ABS_GAS, rbuf[13]);
+  }
+
+  input_sync(data->input_dev);
 }
 
 void report_value_for_prx(int value)
@@ -453,6 +461,7 @@ static void AKECS_CloseDone(void)
 	atomic_set(&t_flag, 1);
 	atomic_set(&mv_flag, 1);
 	atomic_set(&p_flag, 1);
+	atomic_set(&l_flag, 1);
 }
 
 static int akm_aot_open(struct inode *inode, struct file *file)
@@ -504,6 +513,12 @@ akm_aot_ioctl(struct inode *inode, struct file *file,
 		if (flag < 0 || flag > 1)
 			return -EINVAL;
 		break;
+	case ECS_IOCTL_APP_SET_LFLAG:
+		if (copy_from_user(&flag, argp, sizeof(flag)))
+			return -EFAULT;
+		if (flag < 0 || flag > 1)
+			return -EINVAL;
+		break;
 	case ECS_IOCTL_APP_SET_DELAY:
 		if (copy_from_user(&flag, argp, sizeof(flag)))
 			return -EFAULT;
@@ -542,7 +557,13 @@ akm_aot_ioctl(struct inode *inode, struct file *file,
 		break;
 	case ECS_IOCTL_APP_GET_PFLAG:
 		flag = atomic_read(&p_flag);
-		break;	
+		break;
+	case ECS_IOCTL_APP_SET_LFLAG:
+		atomic_set(&l_flag, flag);
+		break;
+	case ECS_IOCTL_APP_GET_LFLAG:
+		flag = atomic_read(&l_flag);
+		break;
 	case ECS_IOCTL_APP_SET_DELAY:
 		akmd_delay = flag;
 		break;
@@ -860,6 +881,7 @@ static int akm8973_init_client(struct i2c_client *client)
 	atomic_set(&a_flag, 1);
 	atomic_set(&t_flag, 1);
 	atomic_set(&p_flag, 1);
+	atomic_set(&l_flag, 1);
 	atomic_set(&mv_flag, 1);
 
 	return 0;
@@ -953,8 +975,10 @@ int akm8973_probe(struct i2c_client *client, const struct i2c_device_id * devid)
 	/* z-axis of raw magnetic vector */
 	input_set_abs_params(akm->input_dev, ABS_BRAKE, -2048, 2032, 0, 0);
 	/*proximity vector */
-	input_set_abs_params(akm->input_dev, ABS_DISTANCE, 0, 1, 0, 0); 
-	  
+	input_set_abs_params(akm->input_dev, ABS_DISTANCE, 0, 1, 0, 0);
+	/*light vector */
+	input_set_abs_params(akm->input_dev, ABS_GAS, 0, 255, 0, 0);
+
 	akm->input_dev->name = "compass";
 
 	err = input_register_device(akm->input_dev);
