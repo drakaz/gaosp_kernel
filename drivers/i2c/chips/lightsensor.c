@@ -112,7 +112,7 @@ int get_lightsensor_light( void )
 	msm_proc_comm(PCOM_CUSTOMER_CMD2, &raw_data, 0);
 	test_value = raw_data;
 
-	printk("[LIGHTSENSOR] get_lightsensor_light = %d\n", test_value);	
+	//printk("[LIGHTSENSOR] get_lightsensor_light = %d\n", test_value);	
 
 	return test_value;	
 }
