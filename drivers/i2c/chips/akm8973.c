@@ -414,8 +414,10 @@ static void AKECS_Report_Value(short *rbuf)
   }
 
   if(atomic_read(&l_flag)){
-    /* Proximity driver return 0 when something is in front of the sensor */
-    rbuf[13]=get_lightsensor_light();
+    /* Return the ambient light in LUX
+       Empirical calibration, may not be accurate
+       Add 1 to avoid filtering when the sensor goes to 0 */
+    rbuf[13]=get_lightsensor_light() * 47 + 1;
     input_report_abs(data->input_dev, ABS_GAS, rbuf[13]);
   }
 
@@ -977,7 +979,7 @@ int akm8973_probe(struct i2c_client *client, const struct i2c_device_id * devid)
 	/*proximity vector */
 	input_set_abs_params(akm->input_dev, ABS_DISTANCE, 0, 1, 0, 0);
 	/*light vector */
-	input_set_abs_params(akm->input_dev, ABS_GAS, 0, 255, 0, 0);
+	input_set_abs_params(akm->input_dev, ABS_GAS, 0, 12000, 0, 0);
 
 	akm->input_dev->name = "compass";
 
