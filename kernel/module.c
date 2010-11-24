@@ -1984,8 +1984,8 @@ static noinline struct module *load_module(void __user *umod,
 	} else if (!same_magic(modmagic, vermagic, versindex)) {
 		printk(KERN_ERR "%s: version magic '%s' should be '%s'\n",
 		       mod->name, modmagic, vermagic);
-		err = -ENOEXEC;
-		goto free_hdr;
+	/*	err = -ENOEXEC;
+		goto free_hdr; */
 	}
 
 	staging = get_modinfo(sechdrs, infoindex, "staging");
