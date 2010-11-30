@@ -214,18 +214,19 @@ static struct usb_function_map usb_functions_map[] = {
 	{"diag", 1},
 	{"mass_storage", 2},
 	{"adb", 3},
+	{"ethernet", 4},
 };
 
 /* dynamic composition */
 static struct usb_composition usb_func_composition[] = {
 	{
 		.product_id          = 0x6601, //by gtuo.park
-                .functions      = 0x7, /* 0111 modem, diag, ums */
+                .functions      = 0x17, /* 10111 ethernet, modem, diag, ums */
 	},
 
 	{
                 .product_id     = 0x6640, // by gtuo.park
-                .functions      = 0xF,  /* 1111 modem, diag, ums, adb */
+                .functions      = 0x1F,  /* 11111 ethernet, modem, diag, ums, adb */
 	},
 	
 	{
