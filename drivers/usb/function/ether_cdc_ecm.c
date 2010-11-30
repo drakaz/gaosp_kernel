@@ -251,7 +251,7 @@ static int eth_bound;
 
 #ifdef DEBUG
 #undef DEBUG
-#define DEBUG(dev, fmt,args...) \
+#define DEBUG(dev, fmt, args...) \
 	xprintk(dev, KERN_DEBUG, fmt, ## args)
 #else
 #define DEBUG(dev, fmt, args...) \
@@ -267,6 +267,9 @@ static int eth_bound;
 
 #define ERROR(dev, fmt, args...) \
 	xprintk(dev, KERN_ERR, fmt, ## args)
+#ifdef WARN
+#undef WARN
+#endif
 #define WARN(dev, fmt, args...) \
 	xprintk(dev, KERN_WARNING, fmt, ## args)
 #define INFO(dev, fmt, args...) \
@@ -585,7 +588,7 @@ static void eth_disconnect(void *_ctxt)
 
 /* NETWORK DRIVER HOOKUP (to the layer above this driver) */
 
-static int eth_change_mtu(struct net_device *net, int new_mtu)
+static int usb_eth_change_mtu(struct net_device *net, int new_mtu)
 {
 	struct eth_dev	*dev = netdev_priv(net);
 
@@ -668,7 +671,7 @@ rx_submit(struct eth_dev *dev, struct usb_request *req, gfp_t gfp_flags)
 
 	retval = usb_ept_queue_xfer(dev->out_ep, req);
 	if (retval == -ENOMEM)
-		enomem :
+enomem:
 		defer_kevent(dev, WORK_RX_MEMORY);
 	if (retval) {
 		DEBUG(dev, "rx submit --> %d\n", retval);
@@ -740,7 +743,7 @@ quiesce:
 	if (skb)
 		dev_kfree_skb_any(skb);
 	if (!netif_running(dev->net)) {
-		clean:
+clean:
 		spin_lock(&dev->req_lock);
 		list_add(&req->list, &dev->rx_reqs);
 		spin_unlock(&dev->req_lock);
@@ -1184,7 +1187,7 @@ static void  eth_bind(void *_ctxt)
 		dev->host_mac[2], dev->host_mac[3],
 		dev->host_mac[4], dev->host_mac[5]);
 
-	net->change_mtu = eth_change_mtu;
+	net->change_mtu = usb_eth_change_mtu;
 	net->get_stats = eth_get_stats;
 	net->hard_start_xmit = eth_start_xmit;
 	net->open = eth_open;
