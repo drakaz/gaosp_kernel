@@ -146,6 +146,8 @@ void usb_configure_endpoint(struct usb_endpoint *ep,
 int usb_remote_wakeup(void);
 /* To allocate endpoint from function driver*/
 struct usb_endpoint *usb_alloc_endpoint(unsigned direction);
+struct usb_endpoint *usb_get_ep0in(void);
+struct usb_endpoint *usb_get_ep0out(void);
 int usb_free_endpoint(struct usb_endpoint *ept);
 /* To enable endpoint from frunction driver*/
 void usb_ept_enable(struct usb_endpoint *ept, int yes);

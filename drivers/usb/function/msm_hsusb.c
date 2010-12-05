@@ -585,6 +585,20 @@ cfg_ept_end:
 }
 EXPORT_SYMBOL(usb_configure_endpoint);
 
+struct usb_endpoint *usb_get_ep0in()
+{
+	struct usb_info *ui = the_usb_info;
+	return &ui->ep0in;
+}
+EXPORT_SYMBOL(usb_get_ep0in);
+
+struct usb_endpoint *usb_get_ep0out()
+{
+	struct usb_info *ui = the_usb_info;
+	return &ui->ep0out;
+}
+EXPORT_SYMBOL(usb_get_ep0out);
+
 #define NUM_EPTS 15	/* number of in or out non-ctrl endpoints */
 struct usb_endpoint *usb_alloc_endpoint(unsigned direction)
 {
@@ -2202,7 +2216,7 @@ void usb_function_enable(const char *function, int enable)
 		if (fi && fi->enabled)
 			functions_mask |= (1 << i);
 	}
-#if 0 /* for the GT-I7500 usb change mode 2009.06.14 gtuo.park*/
+#if 1 /* for the GT-I7500 usb change mode 2009.06.14 gtuo.park*/
 	pid = usb_get_product_id(functions_mask);
 	if (!pid) {
 		fi->enabled = curr_enable;
@@ -3013,11 +3027,15 @@ static ssize_t msm_hsusb_store_compswitch(struct device *dev,
 			pr_info("%s: Requested New Product id = %lx\n", __func__, pid);
 			if(pid == 0x6601) {
 				printk("hidden pid, modem, diag, ums enabled\n");
-			}else if(pid == 0x6640) { 
-				printk("6602 PID : modem, diag, ums, adb enabled\n");
-			}else if(pid == 0x6603) { 
+			}else if(pid == 0x6640) {
+				printk("6640 PID : modem, diag, ums, adb enabled\n");
+			}else if(pid == 0x6605) {
+				printk("6605 PID : ethernet enabled\n");
+			}else if(pid == 0x6606) {
+				printk("6606 PID : adb, ethernet enabled\n");
+			}else if(pid == 0x6603) {
 				printk("6603 PID : ums only\n");
-			}else { 
+			}else {
 				printk("Wrong PID!!\n");
 				return 0;
 			}
@@ -3025,7 +3043,7 @@ static ssize_t msm_hsusb_store_compswitch(struct device *dev,
 
 			orion_param_data = kzalloc(sizeof(struct orion_param),GFP_KERNEL);
 			msm_read_param(orion_param_data);	
-			printk("Composition switched to 0x%d\n",pid);
+			printk("Composition switched to 0x%x\n",pid);
 			orion_param_data->current_usb_pid = pid;
 			msm_write_param(orion_param_data);
 			kfree(orion_param_data);
@@ -3086,15 +3104,74 @@ static ssize_t msm_hsusb_show_speed(struct device *dev,
 	return i;
 }
 
+static ssize_t show_usb_function_switch(struct device *dev,
+					struct device_attribute *attr,
+					char *buf)
+{
+	struct usb_info *ui = the_usb_info;
+	int activated = -1;
+
+	// rndis activated ?
+	activated = ui->composition->functions & 1;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", activated);
+}
+
+
+static ssize_t store_usb_function_switch(struct device *dev,
+						struct device_attribute *attr,
+						const char *buf, size_t count)
+{
+	struct orion_param *orion_param_data;
+	struct usb_info *ui = the_usb_info;
+	unsigned u;
+	unsigned long pid = -1;
+
+	u = simple_strtoul(buf, NULL, 10);
+	// ugly code, sorry...
+	switch (u) {
+	case 0 :
+		if (ui->composition->product_id == 0x6606)
+			pid = 0x6640;
+		else
+			pid = 0x6601;
+		break;
+	case 1 : 
+		if (ui->composition->product_id == 0x6640)
+			pid = 0x6606;
+		else
+			pid = 0x6605;
+		break;
+	}
+
+	if (pid > 0) {
+		// switch composition and save default composition
+		usb_switch_composition((unsigned short)pid);
+
+		orion_param_data = kzalloc(sizeof(struct orion_param),GFP_KERNEL);
+		msm_read_param(orion_param_data);	
+		printk("Composition switched to 0x%x\n",pid);
+		orion_param_data->current_usb_pid = pid;
+		msm_write_param(orion_param_data);
+		kfree(orion_param_data);
+
+		return count;
+	}
+
+	return -EINVAL;
+}
+
 static DEVICE_ATTR(composition, 0666,
 		msm_hsusb_show_compswitch, msm_hsusb_store_compswitch);
-static DEVICE_ATTR(func_enable, S_IWUSR,
+static DEVICE_ATTR(func_enable, S_IWUGO,
 		NULL, msm_hsusb_store_func_enable);
 static DEVICE_ATTR(autoresume, S_IWUSR,
 		NULL, msm_hsusb_store_autoresume);
 static DEVICE_ATTR(state, 0664, msm_hsusb_show_state, NULL);
 static DEVICE_ATTR(lpm, 0664, msm_hsusb_show_lpm, NULL);
 static DEVICE_ATTR(speed, 0664, msm_hsusb_show_speed, NULL);
+static DEVICE_ATTR(usb_function_switch, 0666,
+	show_usb_function_switch, store_usb_function_switch);
 
 static struct attribute *msm_hsusb_attrs[] = {
 	&dev_attr_composition.attr,
@@ -3103,6 +3180,7 @@ static struct attribute *msm_hsusb_attrs[] = {
 	&dev_attr_state.attr,
 	&dev_attr_lpm.attr,
 	&dev_attr_speed.attr,
+	&dev_attr_usb_function_switch.attr,
 	NULL,
 };
 static struct attribute_group msm_hsusb_attr_grp = {
@@ -3124,7 +3202,7 @@ static int __init usb_probe(struct platform_device *pdev)
 	char temp_serial_number[12] = { 0 , };
 	static int need_to_be_updated = 0;
 
-	pid = 0x6603; // base PID, only USB Mass Storage
+	pid = 0x6601; // base PID, only USB Mass Storage
 
 	orion_param_data = kzalloc(sizeof(struct orion_param),GFP_KERNEL);
 	memset(orion_param_data,0,sizeof(struct orion_param));
@@ -3149,11 +3227,11 @@ static int __init usb_probe(struct platform_device *pdev)
 	}
 	printk("Saved USB PID : 0x%x, serial num : %s\n",orion_param_data->current_usb_pid,orion_param_data->usb_serial_number);
 
-
-
 	if((orion_param_data->current_usb_pid != 0x6601) &&
 			(orion_param_data->current_usb_pid != 0x6640) &&
-			(orion_param_data->current_usb_pid != 0x6603)) {
+			(orion_param_data->current_usb_pid != 0x6603) &&
+			(orion_param_data->current_usb_pid != 0x6605) &&
+			(orion_param_data->current_usb_pid != 0x6606)) {
 		printk("Wrong current PID, save base PID. this state is first boot up\n");
 		printk("Set the USB Serial Numner to %s\n",orion_param_data->usb_serial_number);
 
@@ -3557,6 +3635,17 @@ static int usb_find_descriptor(struct usb_info *ui, struct usb_ctrlrequest *ctl,
 			desc_device.bDeviceClass = 0xEF;
 			desc_device.bDeviceSubClass = 0x02;
 			desc_device.bDeviceProtocol = 0x01;
+#ifdef CONFIG_USB_FUNCTION_RNDIS_WCEIS
+		/* is rndis activated ? */
+		} else if (ui->composition->functions & 1) {
+			desc_device.bDeviceClass = USB_CLASS_WIRELESS_CONTROLLER;
+			desc_device.bDeviceSubClass = 1;
+			desc_device.bDeviceProtocol = 3;
+#endif
+		} else {
+			desc_device.bDeviceClass = USB_CLASS_COMM;
+			desc_device.bDeviceSubClass = 0;
+			desc_device.bDeviceProtocol = 0;
 		}
 		memcpy(req->buf, &desc_device, req->length);
 		return 0;
