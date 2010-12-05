@@ -40,7 +40,7 @@
 #include "acpuclock.h"
 #include "socinfo.h"
 
-#define PERF_SWITCH_DEBUG 1
+#define PERF_SWITCH_DEBUG 0
 #define PERF_SWITCH_STEP_DEBUG 0
 
 #define VOLT_CLASS "cpu"
