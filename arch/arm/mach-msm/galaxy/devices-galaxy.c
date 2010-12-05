@@ -210,38 +210,38 @@ static struct platform_device android_usb_device = {
 
 #ifdef CONFIG_USB_FUNCTION
 static struct usb_function_map usb_functions_map[] = {
-	{"modem", 0},
-	{"diag", 1},
-	{"mass_storage", 2},
-	{"adb", 3},
-	{"ethernet", 4},
+	{"ethernet", 0},
+	{"modem", 1},
+	{"diag", 2},
+	{"mass_storage", 3},
+	{"adb", 4},
 };
 
 /* dynamic composition */
 static struct usb_composition usb_func_composition[] = {
 	{
 		.product_id          = 0x6601, //by gtuo.park
-                .functions      = 0x17, /* 10111 ethernet, modem, diag, ums */
+                .functions      = 0x0E, /* 1110 modem, diag, ums */
 	},
 
 	{
                 .product_id     = 0x6640, // by gtuo.park
-                .functions      = 0x1F,  /* 11111 ethernet, modem, diag, ums, adb */
+                .functions      = 0x1E,  /* 11110 modem, diag, ums, adb */
 	},
-	
+
 	{
 		.product_id			= 0x6603, // by gtuo.park
-                .functions      = 0x4,  /* ums only*/
+                .functions      = 0x8,  /* ums only*/
 	},
 
 	{
-		.product_id         = 0x9013,
-		.functions	    = 0x15, /* 10101 */
+		.product_id         = 0x6605,
+		.functions	    = 0x01, /* 1 ethernet */
 	},
 
 	{
-		.product_id         = 0x9014,
-		.functions	    = 0x30, /* 110000 */
+		.product_id         = 0x6606,
+		.functions	    = 0x11, /* 100001 adb, ethernet */
 	},
 
 	{

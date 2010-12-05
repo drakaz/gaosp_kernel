@@ -47,7 +47,7 @@
 	do { } while (0)
 #endif /* DEBUG */
 
-#define ETHER_FUNCTION_NAME "ether"
+#define ETHER_FUNCTION_NAME "ethernet"
 
 static char		manufacturer [10] = "HTC";
 
@@ -73,7 +73,6 @@ control_intf = {
 	.bInterfaceSubClass =   USB_CDC_SUBCLASS_ACM,
 	.bInterfaceProtocol =   USB_CDC_ACM_PROTO_VENDOR,
 #endif
-	.iInterface =           STRING_ES,
 };
 
 static struct usb_cdc_header_desc header_desc = {
@@ -131,7 +130,6 @@ data_intf = {
 	.bInterfaceClass =	USB_CLASS_CDC_DATA,
 	.bInterfaceSubClass =	0,
 	.bInterfaceProtocol =	0,
-	.iInterface =		STRING_ES,
 };
 
 //OUT
@@ -189,6 +187,7 @@ struct ether_context {
 	u16			cdc_filter;
 	int registered;
 	int online;
+	unsigned bound;
 };
 
 static void receive_rndis_command (struct usb_endpoint *ep, struct usb_request *req);
@@ -199,8 +198,7 @@ static void ether_in_complete(struct usb_endpoint *ept,
 			      struct usb_request *req);
 static void ether_out_complete(struct usb_endpoint *ept,
 			       struct usb_request *req);
-static void eth_bind(struct usb_endpoint **ept,
-				void *_ctxt);
+static void eth_bind(void *_ctxt);
 static void eth_unbind(void *_ctxt);
 
 static void eth_configure(int configured, void *_ctxt);
@@ -228,13 +226,9 @@ static struct usb_function usb_func_ether = {
 
 	.ifc_name = "ether",
 
-	.ifc_num = 2,
 	.ifc_ept_count = 3,
 	.ifc_ept_type = { EPT_INT_IN, EPT_BULK_OUT, EPT_BULK_IN },
 
-	.ifc_copy = rndis_desc_copy,
-
-	.position_bit = USB_FUNCTION_INTERNET_SHARING_NUM,
 	.disabled = 1,
 };
 
@@ -295,7 +289,7 @@ static int rndis_control_ack (struct net_device *net)
 	return 0;
 }
 
-static ssize_t store_enable(struct device *dev, struct device_attribute *attr,
+/*static ssize_t store_enable(struct device *dev, struct device_attribute *attr,
                 const char *buf, size_t count)
 {
         unsigned long ul;
@@ -324,12 +318,17 @@ static ssize_t show_enable(struct device *dev, struct device_attribute *attr,
 
 }
 
-static DEVICE_ATTR(enable, 0644, show_enable, store_enable);
+static DEVICE_ATTR(enable, 0644, show_enable, store_enable);*/
 
 static void eth_unbind(void *_ctxt)
 {
 	struct ether_context *ctxt = _ctxt;
 	struct usb_request *req;
+
+	DBG("eth_unbind");
+
+	if (!ctxt->bound)
+		return;
 
 	while ((req = req_get(ctxt, &ctxt->tx_intr_reqs))) {
 		usb_ept_free_req(ctxt->intr_in, req);
@@ -343,34 +342,75 @@ static void eth_unbind(void *_ctxt)
 	while ((req = req_get(ctxt, &ctxt->tx_reqs))) {
 		usb_ept_free_req(ctxt->in, req);
 	}
+
+	if (ctxt->in) {
+		usb_ept_fifo_flush(ctxt->in);
+		usb_ept_enable(ctxt->in, 0);
+		usb_free_endpoint(ctxt->in);
+	}
+	if (ctxt->out) {
+		usb_ept_fifo_flush(ctxt->out);
+		usb_ept_enable(ctxt->out, 0);
+		usb_free_endpoint(ctxt->out);
+	}
+	if (ctxt->intr_in) {
+		usb_ept_fifo_flush(ctxt->intr_in);
+		usb_ept_enable(ctxt->intr_in, 0);
+		usb_free_endpoint(ctxt->intr_in);
+	}
+
 	if (ctxt->registered == 1) {
-		device_remove_file(&ctxt->dev->dev, &dev_attr_enable);
+//		device_remove_file(&ctxt->dev->dev, &dev_attr_enable);
 		ctxt->registered = 0;
 	}
 	rndis_deregister (ctxt->rndis_config);
 	//rndis_exit ();
 	//unregister_netdev (ctxt->dev);
 	//free_netdev(ctxt->dev);
+	ctxt->bound = 0;
 }
 
-static void eth_bind(struct usb_endpoint **ept, void *_ctxt)
+static void eth_bind(void *_ctxt)
 {
 	struct ether_context *ctxt = _ctxt;
 	struct usb_request *req;
 	unsigned long flags;
 	int n;
 	int	status = -ENOMEM;
-	struct usb_fi_ept *ept_info;
 
 	u32	vendorID = 0x0bb4;
 
 	ctxt->registered = 0;
 
-	ctxt->intr_in = ept[0];
-	ctxt->out = ept[1];
-	ctxt->in = ept[2];
-	ctxt->ep0in = ept[3];
-	ctxt->ep0out = ept[4];
+	/* Configuring STATUS endpoint */
+	ctxt->intr_in = usb_alloc_endpoint(USB_DIR_IN);
+	ctxt->intr_in->max_pkt = 64;
+
+	status_desc.bEndpointAddress = USB_DIR_IN | ctxt->intr_in->num;
+
+	/* Configuring OUT endpoint */
+	ctxt->out = usb_alloc_endpoint(USB_DIR_OUT);
+	ctxt->out->max_pkt = 512;
+	sink_desc.bEndpointAddress = USB_DIR_OUT | ctxt->out->num;
+
+	/*Configuring IN Endpoint*/
+	ctxt->in = usb_alloc_endpoint(USB_DIR_IN);
+	ctxt->in->max_pkt = 512;
+	source_desc.bEndpointAddress = USB_DIR_IN | ctxt->in->num;
+
+	/*Configuring IN Endpoint*/
+	ctxt->ep0in = usb_get_ep0in();
+	ctxt->ep0out = usb_get_ep0out();
+
+	control_intf.iInterface = usb_msm_get_next_strdesc_id("Ethernet Data");
+	control_intf.bInterfaceNumber = usb_msm_get_next_ifc_number(&usb_func_ether);
+	data_intf.iInterface = usb_msm_get_next_strdesc_id("CDC Communications Control");
+	data_intf.bInterfaceNumber = usb_msm_get_next_ifc_number(&usb_func_ether);
+
+	call_mgmt_desc.bDataInterface = data_intf.bInterfaceNumber;
+	union_desc.bMasterInterface0 = control_intf.bInterfaceNumber;
+	union_desc.bSlaveInterface0 = data_intf.bInterfaceNumber;
+
 
 	for (n = 0; n < MAX_INTR_TX; n++) {
 		req = usb_ept_alloc_req(ctxt->intr_in, 8);
@@ -411,19 +451,11 @@ static void eth_bind(struct usb_endpoint **ept, void *_ctxt)
 		spin_unlock_irqrestore(&ctxt->lock, flags);
 	}
 
-	ept_info = get_ept_info(ETHER_FUNCTION_NAME);
-	if (!ept_info)
-		goto fail;
-
-	status_desc.bEndpointAddress = ept_info[0].desc.bEndpointAddress;
-	sink_desc.bEndpointAddress = ept_info[1].desc.bEndpointAddress;
-	source_desc.bEndpointAddress = ept_info[2].desc.bEndpointAddress;
-
-	status = device_create_file(&ctxt->dev->dev, &dev_attr_enable);
+/*	status = device_create_file(&ctxt->dev->dev, &dev_attr_enable);
 	if (status != 0) {
 		printk(KERN_ERR "ether device_create_file failed: %d\n", status);
         goto fail;
-	}
+	}*/
 	ctxt->registered = 1;
 	ctxt->online = 0;
 	status = rndis_init();
@@ -453,9 +485,11 @@ static void eth_bind(struct usb_endpoint **ept, void *_ctxt)
 					NDIS_MEDIUM_802_3, 0))
 		goto fail;
 
+	ctxt->bound = 1;
 	return;
 
 fail:
+	ctxt->bound = 1;
 	eth_unbind (ctxt);
 	return;
 }
@@ -597,12 +631,26 @@ static void rx_fill(struct ether_context *ctxt)
 static void eth_configure(int configured, void *_ctxt)
 {
 	struct ether_context *ctxt = _ctxt;
+
+	if (!ctxt->bound)
+	    return;
+
 	netif_stop_queue(ctxt->dev);
 	netif_carrier_off(ctxt->dev);
 	ctxt->online = 0;
 
+
 	if (configured) {
 		ctxt->online = 1;
+
+		usb_configure_endpoint(ctxt->intr_in, &status_desc);
+		usb_configure_endpoint(ctxt->in, &sink_desc);
+		usb_configure_endpoint(ctxt->out, &source_desc);
+
+		usb_ept_enable(ctxt->intr_in, 1);
+		usb_ept_enable(ctxt->in, 1);
+		usb_ept_enable(ctxt->out, 1);
+
 		rx_fill(ctxt);
 		netif_carrier_on(ctxt->dev);
 		if (netif_running(ctxt->dev))
@@ -732,6 +780,10 @@ static int usb_ether_xmit(struct sk_buff *skb, struct net_device *dev)
 	unsigned len;
 	struct sk_buff	*skb_rndis;
 
+	// return if interface is not yet binded
+	if (!ctxt->bound)
+		return 0;
+
 	req = req_get(ctxt, &ctxt->tx_reqs);
 	if (!req) {
 		pr_err("usb_ether_xmit: could not obtain tx request\n");
@@ -810,6 +862,19 @@ static int usb_ether_stop(struct net_device *dev)
 		rndis_set_param_medium(ctxt->rndis_config, NDIS_MEDIUM_802_3, 0);
 		(void) rndis_signal_disconnect (ctxt->rndis_config);
 	}
+
+	usb_ept_enable(ctxt->out, 0);
+	usb_ept_enable(ctxt->intr_in, 0);
+	if (netif_carrier_ok(ctxt->dev)) {
+		DBG("host still using in/out endpoints\n");
+		usb_ept_enable(ctxt->in, 1);
+		usb_ept_enable(ctxt->out, 1);
+	}
+	if (ctxt->intr_in) {
+		usb_ept_enable(ctxt->intr_in, 0);
+		usb_ept_enable(ctxt->intr_in, 1);
+	}
+
 	return 0;
 }
 
@@ -859,6 +924,10 @@ static int __init ether_init(void)
 
 	ctxt = netdev_priv(dev);
 	usb_func_ether.context = ctxt;
+
+	usb_func_ether.hs_descriptors = rndis_desc;
+	usb_func_ether.fs_descriptors = rndis_desc;
+
 	ret = usb_function_register(&usb_func_ether);
 	if (ret < 0)
 		goto err_register_function;
