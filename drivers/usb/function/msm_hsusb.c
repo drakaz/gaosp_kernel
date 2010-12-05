@@ -71,7 +71,7 @@
 
 static int vbus;
 #if defined(CONFIG_SAMSUNG_TARGET) /* kthur : check pid */
-static int pid = 0x6603;
+static int pid = 0x6640;
 #else
 static int pid = 0x9018;
 #endif
