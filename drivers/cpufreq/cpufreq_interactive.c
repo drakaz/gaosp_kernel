@@ -490,19 +490,19 @@ static void cpufreq_interactive_freq_down(struct work_struct *work)
 	}
 }
 
-static ssize_t show_min_sample_time(struct kobject *kobj,
-				struct attribute *attr, char *buf)
+static ssize_t show_min_sample_time(struct cpufreq_policy *policy,
+				char *buf)
 {
 	return sprintf(buf, "%lu\n", min_sample_time);
 }
 
-static ssize_t store_min_sample_time(struct kobject *kobj,
-			struct attribute *attr, const char *buf, size_t count)
+static ssize_t store_min_sample_time(struct cpufreq_policy *policy,
+				const char *buf, size_t count)
 {
 	return strict_strtoul(buf, 0, &min_sample_time);
 }
 
-static struct global_attr min_sample_time_attr = __ATTR(min_sample_time, 0644,
+static struct freq_attr min_sample_time_attr = __ATTR(min_sample_time, 0644,
 		show_min_sample_time, store_min_sample_time);
 
 static struct attribute *interactive_attributes[] = {
@@ -541,7 +541,7 @@ static int cpufreq_governor_interactive(struct cpufreq_policy *new_policy,
 		if (atomic_inc_return(&active_count) > 1)
 			return 0;
 
-		rc = sysfs_create_group(cpufreq_global_kobject,
+		rc = sysfs_create_group(&new_policy->kobj,
 				&interactive_attr_group);
 		if (rc)
 			return rc;
@@ -556,7 +556,7 @@ static int cpufreq_governor_interactive(struct cpufreq_policy *new_policy,
 		if (atomic_dec_return(&active_count) > 0)
 			return 0;
 
-		sysfs_remove_group(cpufreq_global_kobject,
+		sysfs_remove_group(&new_policy->kobj,
 				&interactive_attr_group);
 
 		pm_idle = pm_idle_old;
