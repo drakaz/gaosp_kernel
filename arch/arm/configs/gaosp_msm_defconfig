@@ -1,7 +1,7 @@
 #
 # Automatically generated make config: don't edit
 # Linux kernel version: 2.6.29
-# Tue Dec  7 00:20:05 2010
+# Sat Dec 11 19:18:44 2010
 #
 CONFIG_SAMSUNG_TARGET=y
 CONFIG_ARM=y
@@ -1537,7 +1537,9 @@ CONFIG_STAGING=y
 # CONFIG_STAGING_EXCLUDE_BUILD is not set
 # CONFIG_MEILHAUS is not set
 # CONFIG_USB_IP_COMMON is not set
+# CONFIG_PRISM2_USB is not set
 # CONFIG_ECHO is not set
+# CONFIG_USB_ATMEL is not set
 # CONFIG_COMEDI is not set
 # CONFIG_ASUS_OLED is not set
 # CONFIG_INPUT_MIMIO is not set
