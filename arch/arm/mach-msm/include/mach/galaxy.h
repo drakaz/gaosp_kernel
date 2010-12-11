@@ -73,6 +73,8 @@ extern int new_board_revison_chk;
 
 #define GPIO_CHK_BOARD_REV 99
 
+#define GALAXY_GPIO_WIFI_IRQ GPIO_WLAN_HOST_WAKE
+
 #if !defined(CONFIG_MACH_GALAXY_REV05) && !defined(CONFIG_MACH_GALAXY_REV03)
 #define GPIO_WLAN_BT_REG_ON	104
 //#define GPIO_WLAN_BT_REG_ON (new_board_revison_chk ? 85 : 20)

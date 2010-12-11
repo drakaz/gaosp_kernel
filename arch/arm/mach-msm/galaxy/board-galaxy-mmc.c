@@ -398,7 +398,7 @@ static struct mmc_platform_data wifi_data = {
 	.translate_vdd	= msm_wifi_setup_power,
 };
 
-void wifi_set_carddetect(int val)
+int galaxy_wifi_set_carddetect(int val)
 {
 	wifi_cd = val;
 	if(wifi_status_cb)
@@ -409,13 +409,14 @@ void wifi_set_carddetect(int val)
 	{
 		printk("%s: Nobody to notify\n", __func__);
 	}
+  return 0;
 }
-EXPORT_SYMBOL(wifi_set_carddetect);
+EXPORT_SYMBOL(galaxy_wifi_set_carddetect);
 
 static int wifi_power_state;
 
 
-int wifi_card_power(int on)
+int galaxy_wifi_card_power(int on)
 {
 	printk("%s: %d\n", __func__, on);
     
@@ -432,7 +433,7 @@ int wifi_card_power(int on)
     
     return 0;
 }
-EXPORT_SYMBOL(wifi_card_power);
+EXPORT_SYMBOL(galaxy_wifi_card_power);
 
 int wifi_power(int on)
 {
@@ -440,14 +441,19 @@ int wifi_power(int on)
 	printk("%s: %d\n", __func__, on);
 
 	/* Power on the BCM4325 */
-    wifi_card_power(on);
+    galaxy_wifi_card_power(on);
 
     /* Do the mmc_rescan */
-    wifi_set_carddetect(on);
+    galaxy_wifi_set_carddetect(on);
 
 	return 0;
 }
 EXPORT_SYMBOL(wifi_power);
+
+int galaxy_wifi_reset(int on) {
+  // nothing
+  return 0;
+}
 
 void __init galaxy_init_mmc(void)
 {
@@ -484,7 +490,7 @@ static int mmc_dbg_wifi_reset_set(void *data, u64 *val)
 	return 0;
 }
 
-static int mmc_dbg_wifi_cd_get(void *data, u64 *val)	// wifi_set_carddetect((int) val);
+static int mmc_dbg_wifi_cd_get(void *data, u64 *val)	// galaxy_wifi_set_carddetect((int) val);
 {
 	*val = wifi_cd;
 	return 0;
@@ -492,7 +498,7 @@ static int mmc_dbg_wifi_cd_get(void *data, u64 *val)	// wifi_set_carddetect((int
 
 static int mmc_dbg_wifi_cd_set(void *data, u64 *val)
 {
-	wifi_set_carddetect((int) val);
+	galaxy_wifi_set_carddetect((int) val);
 	return 0;
 }
 

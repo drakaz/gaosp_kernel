@@ -62,7 +62,7 @@
 #include <linux/wakelock.h>
 #endif
 #if defined(CUSTOMER_HW2) && defined(CONFIG_WIFI_CONTROL_FUNC)
-#include <linux/wlan_plat.h>
+#include <linux/wifi_tiwlan.h>
 
 struct semaphore wifi_control_sem;
 
@@ -120,9 +120,9 @@ int wifi_get_mac_addr(unsigned char *buf)
 	printk("%s\n", __FUNCTION__);
 	if (!buf)
 		return -EINVAL;
-	if (wifi_control_data && wifi_control_data->get_mac_addr) {
+	/*if (wifi_control_data && wifi_control_data->get_mac_addr) {
 		return wifi_control_data->get_mac_addr(buf);
-	}
+	}*/
 	return -EOPNOTSUPP;
 }
 
