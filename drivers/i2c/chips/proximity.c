@@ -29,6 +29,7 @@
 #include <asm/gpio.h>//LGE_CHANGE [diyu@lge.com]  //diyu@lge.com
 #include <mach/vreg.h> //LGE_CHANGE [diyu@lge.com] To set vreg
 #include <linux/wakelock.h>
+#include <linux/i2c/proximity.h>
 
 #define OBJECT_DETECTED		 1
 #define	OBJECT_NOT_DETECTED	0
@@ -37,7 +38,7 @@
 #define USE_IRQ				1
 #define GPIO_PROX_IRQ 		57 /*PROX_OUT*/
 
-#define PROXIMITY_DEBUG 0
+#define PROXIMITY_DEBUG 1
 #if PROXIMITY_DEBUG
 #define PDBG(fmt, args...) printk(fmt, ##args)
 #else
@@ -108,17 +109,7 @@ static ssize_t gp2ap002_read(struct file *filp, char *buf, size_t count, loff_t 
 		return size;
 }
 #endif
-static int gp2ap002_ioctl(struct inode *inode, struct file *filp, 
-		unsigned int cmd, unsigned long arg)
-{
-	struct psensor_dev *dev = (struct psensor_dev *)_dev;
-	PDBG("\n\nCheck point : %s-1\n", __FUNCTION__);
-	
-	if (NULL == dev)
-		return -ENODEV;
 
-	return 0;
-}
 
 /*
 static unsigned int gp2ap002_poll(struct file *filp, struct poll_table_struct *wait)
@@ -140,19 +131,6 @@ static struct file_operations gp2ap002_fops = {
 */
 
 
-/* use miscdevice for ioctls */
-static struct file_operations gp2ap002_fops = {
-	.owner   = THIS_MODULE,
-	.open    = gp2ap002_open,
-	.release = gp2ap002_release,
-	.ioctl   = gp2ap002_ioctl,
-};
-
-static struct miscdevice gp2ap002_dev = {
-	.minor = MISC_DYNAMIC_MINOR,
-	.name  = MISC_DEV_NAME,
-	.fops  = &gp2ap002_fops,
-};
 
 /* 
  * Sharp Proximity Sensor Interface 
@@ -362,6 +340,7 @@ static struct attribute_group psensor_attr_group = {
 };
 #endif
 
+
 static ssize_t sharp_gp2ap002_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	int prox_gpio_state;
@@ -376,48 +355,48 @@ static ssize_t sharp_gp2ap002_enable_show(struct device *dev, struct device_attr
 	return sprintf(buf, "%d\n", s_prox_sensor); //irq_set);
 }
 
+static int sharp_gp2ap002_enable(int enabled) {
+	struct psensor_dev *pdev = _dev;
+
+	printk(KERN_ERR "\n[GP2AP002] %s (old: %d, new: %d)\n", __FUNCTION__, irq_set, enabled);
+
+	if (enabled == irq_set)
+		return; /* nothing to do */
+
+	atomic_set(&s_prox_sensor, enabled);
+
+	if (enabled == 1 ) {
+		irq_set = 1;
+		prox_vreg_set(1);
+		udelay(100);
+		sharp_psensor_init(pdev->client);
+		PDBG("set_irq_wake on \n");
+	} else if (enabled == 0) {
+		irq_set = 0;
+		prox_vreg_set(0);
+		PDBG("set_irq_wake off \n");
+	}
+
+	if (irq_set == 1) {
+		enable_irq(gpio_to_irq(GPIO_PROX_IRQ));
+		set_irq_wake(gpio_to_irq(GPIO_PROX_IRQ), irq_set);
+	} else if(irq_set == 0) {
+		disable_irq(gpio_to_irq(GPIO_PROX_IRQ));
+		set_irq_wake(gpio_to_irq(GPIO_PROX_IRQ), irq_set);
+	}
+
+	return 0;
+}
+
 static ssize_t sharp_gp2ap002_enable_store(
 		struct device *dev, struct device_attribute *attr, 
 		const char *buf, size_t size)
 {
-	struct psensor_dev *pdev = _dev;
 	int value;
-	int ret=0;
 	sscanf(buf, "%d", &value);
 
-	atomic_set(&s_prox_sensor, value);
+	sharp_gp2ap002_enable(value);
 
-	/*  value == 0  : stop hall ic_irq_wake	 
-	 *    value ==1  : start hall ic_irq_wake
-	       value ==   :  */
-
-	printk(KERN_ERR "\n[PROX] %s(old: %d, new: %d)\n", __FUNCTION__, irq_set, value);
-    if(value == irq_set)
-      return size; /* nothing to do */
-
-	if(value ==1 ) {
-		irq_set = 1;
-		prox_vreg_set(1);
-		udelay(100);
-		ret = sharp_psensor_init(pdev->client);
-		PDBG("set_irq_wake on \n");
-	}else if(value == 0){
-		irq_set = 0;	
-		prox_vreg_set(0);
-		PDBG("set_irq_wake off \n"); 
-		
-	}
-
-	if(irq_set == 1){
-		enable_irq(gpio_to_irq(GPIO_PROX_IRQ));
-		set_irq_wake(gpio_to_irq(GPIO_PROX_IRQ), irq_set);
-	}else if(irq_set == 0){
-		disable_irq(gpio_to_irq(GPIO_PROX_IRQ));
-		set_irq_wake(gpio_to_irq(GPIO_PROX_IRQ), irq_set);
-	}
-		
-	
-	
 	return size;
 }
 
@@ -425,6 +404,36 @@ static DEVICE_ATTR(show, S_IRUGO | S_IWUSR, sharp_gp2ap002_show, NULL);
 
 static DEVICE_ATTR(enable, S_IRUGO | S_IWUGO, sharp_gp2ap002_enable_show, sharp_gp2ap002_enable_store);
 
+
+
+static int gp2ap002_ioctl(struct inode *inode, struct file *filp, 
+		unsigned int cmd, unsigned long arg)
+{
+	struct psensor_dev *dev = (struct psensor_dev *)_dev;
+	int val;
+	
+	if (NULL == dev)
+		return -ENODEV;
+
+	switch (cmd) {
+		case GP2AP_IOCTL_ENABLE:
+			PDBG("%s %s\n", __FUNCTION__, "GP2AP_IOCTL_ENABLE");
+			if (get_user(val, (unsigned long __user *)arg))
+				return -EFAULT;
+			if (val)
+				return sharp_gp2ap002_enable(1);
+			else
+				return sharp_gp2ap002_enable(0);
+			break;
+		case GP2AP_IOCTL_GET_ENABLED:
+			PDBG("%s %s\n", __FUNCTION__, "GP2AP_IOCTL_GET_ENABLED");
+			return put_user(irq_set, (unsigned long __user *)arg);
+			break;
+		default:
+			pr_err("%s: invalid cmd %d\n", __func__, _IOC_NR(cmd));
+			return -EINVAL;
+	}
+}
 /*
  * interrupt service routine
  */
@@ -472,6 +481,20 @@ static int gp2ap002_resume(struct i2c_client *client)
 
 	return 0;
 }
+
+/* use miscdevice for ioctls */
+static struct file_operations gp2ap002_fops = {
+	.owner   = THIS_MODULE,
+	.open    = gp2ap002_open,
+	.release = gp2ap002_release,
+	.ioctl   = gp2ap002_ioctl,
+};
+
+static struct miscdevice gp2ap002_dev = {
+	.minor = MISC_DYNAMIC_MINOR,
+	.name  = MISC_DEV_NAME,
+	.fops  = &gp2ap002_fops,
+};
 
 static int gp2ap002_probe(struct i2c_client *client,
 			const struct i2c_device_id *dev_id)
