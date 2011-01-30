@@ -27,7 +27,6 @@
 #include <linux/freezer.h>
 #include <linux/i2c/akm8973.h>
 
-#include <linux/i2c/proximity.h>
 #include <linux/i2c/lightsensor.h>
 #include <linux/earlysuspend.h>
 
@@ -399,19 +398,6 @@ static void AKECS_Report_Value(short *rbuf)
 		input_report_abs(data->input_dev, ABS_HAT0Y, rbuf[10]);
 		input_report_abs(data->input_dev, ABS_BRAKE, rbuf[11]);
 	}
-	/* Report proximity information */
-/*	if (atomic_read(&p_flag)) {
-		rbuf[12]=proximity_get_value();
-		input_report_abs(data->input_dev, ABS_DISTANCE, rbuf[12]);
-	#if DEBUG	
-		printk("Proximity = %d\n", rbuf[12]);
-	#endif
-	}*/
-  if(atomic_read(&p_flag)){
-    /* Proximity driver return 0 when something is in front of the sensor */
-    rbuf[12]=is_proxi_open() ? 0 : 1;
-    input_report_abs(data->input_dev, ABS_DISTANCE, rbuf[12]);
-  }
 
   if(atomic_read(&l_flag)){
     /* Return the ambient light in LUX
@@ -422,17 +408,6 @@ static void AKECS_Report_Value(short *rbuf)
   }
 
   input_sync(data->input_dev);
-}
-
-void report_value_for_prx(int value)
-{
-		
-	struct akm8973_data *data = i2c_get_clientdata(this_client);
-	printk("[AK8973] Proximity = %d\n", value);
-	input_report_abs(data->input_dev, ABS_DISTANCE,value );
-	input_sync(data->input_dev);
-
-
 }
 
 static int AKECS_GetOpenStatus(void)
@@ -976,8 +951,6 @@ int akm8973_probe(struct i2c_client *client, const struct i2c_device_id * devid)
 	input_set_abs_params(akm->input_dev, ABS_HAT0Y, -2048, 2032, 0, 0);
 	/* z-axis of raw magnetic vector */
 	input_set_abs_params(akm->input_dev, ABS_BRAKE, -2048, 2032, 0, 0);
-	/*proximity vector */
-	input_set_abs_params(akm->input_dev, ABS_DISTANCE, 0, 1, 0, 0);
 	/*light vector */
 	input_set_abs_params(akm->input_dev, ABS_GAS, 0, 12000, 0, 0);
 
