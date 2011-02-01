@@ -7,6 +7,11 @@
 #define GP2AP_IOCTL_ENABLE \
 		_IOW(GP2AP_IOCTL_MAGIC, 2, int *)
 
-int is_proxi_open(void);
+enum gp2ap_mod {
+	PROXIMITY = 1,
+	LIGHT
+};
+
+int sharp_gp2ap002_enable(int enable, enum gp2ap_mod mode);
 
 #endif
