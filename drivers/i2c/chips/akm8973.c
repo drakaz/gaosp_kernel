@@ -62,8 +62,6 @@ static atomic_t m_flag;
 static atomic_t a_flag;
 static atomic_t t_flag;
 static atomic_t mv_flag;
-static atomic_t p_flag;
-static atomic_t l_flag;
 //static int failure_count = 0;
 
 static short akmd_delay = 0;
@@ -399,15 +397,7 @@ static void AKECS_Report_Value(short *rbuf)
 		input_report_abs(data->input_dev, ABS_BRAKE, rbuf[11]);
 	}
 
-  if(atomic_read(&l_flag)){
-    /* Return the ambient light in LUX
-       Empirical calibration, may not be accurate
-       Add 1 to avoid filtering when the sensor goes to 0 */
-    rbuf[13]=get_lightsensor_light() * 47 + 1;
-    input_report_abs(data->input_dev, ABS_GAS, rbuf[13]);
-  }
-
-  input_sync(data->input_dev);
+	input_sync(data->input_dev);
 }
 
 static int AKECS_GetOpenStatus(void)
@@ -437,8 +427,6 @@ static void AKECS_CloseDone(void)
 	atomic_set(&a_flag, 1);
 	atomic_set(&t_flag, 1);
 	atomic_set(&mv_flag, 1);
-	atomic_set(&p_flag, 1);
-	atomic_set(&l_flag, 1);
 }
 
 static int akm_aot_open(struct inode *inode, struct file *file)
@@ -484,13 +472,6 @@ akm_aot_ioctl(struct inode *inode, struct file *file,
 	case ECS_IOCTL_APP_SET_AFLAG:
 	case ECS_IOCTL_APP_SET_TFLAG:
 	case ECS_IOCTL_APP_SET_MVFLAG:
-	case ECS_IOCTL_APP_SET_PFLAG:
-		if (copy_from_user(&flag, argp, sizeof(flag)))
-			return -EFAULT;
-		if (flag < 0 || flag > 1)
-			return -EINVAL;
-		break;
-	case ECS_IOCTL_APP_SET_LFLAG:
 		if (copy_from_user(&flag, argp, sizeof(flag)))
 			return -EFAULT;
 		if (flag < 0 || flag > 1)
@@ -529,18 +510,6 @@ akm_aot_ioctl(struct inode *inode, struct file *file,
 	case ECS_IOCTL_APP_GET_MVFLAG:
 		flag = atomic_read(&mv_flag);
 		break;
-	case ECS_IOCTL_APP_SET_PFLAG:
-		atomic_set(&p_flag, flag);
-		break;
-	case ECS_IOCTL_APP_GET_PFLAG:
-		flag = atomic_read(&p_flag);
-		break;
-	case ECS_IOCTL_APP_SET_LFLAG:
-		atomic_set(&l_flag, flag);
-		break;
-	case ECS_IOCTL_APP_GET_LFLAG:
-		flag = atomic_read(&l_flag);
-		break;
 	case ECS_IOCTL_APP_SET_DELAY:
 		akmd_delay = flag;
 		break;
@@ -556,7 +525,6 @@ akm_aot_ioctl(struct inode *inode, struct file *file,
 	case ECS_IOCTL_APP_GET_AFLAG:
 	case ECS_IOCTL_APP_GET_TFLAG:
 	case ECS_IOCTL_APP_GET_MVFLAG:
-	case ECS_IOCTL_APP_GET_PFLAG:
 	case ECS_IOCTL_APP_GET_DELAY:
 		if (copy_to_user(argp, &flag, sizeof(flag)))
 			return -EFAULT;
@@ -857,8 +825,6 @@ static int akm8973_init_client(struct i2c_client *client)
 	atomic_set(&m_flag, 1);
 	atomic_set(&a_flag, 1);
 	atomic_set(&t_flag, 1);
-	atomic_set(&p_flag, 1);
-	atomic_set(&l_flag, 1);
 	atomic_set(&mv_flag, 1);
 
 	return 0;
