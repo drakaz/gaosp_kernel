@@ -27,7 +27,6 @@
 #include <linux/freezer.h>
 #include <linux/i2c/akm8973.h>
 
-#include <linux/i2c/proximity.h>
 #include <linux/i2c/lightsensor.h>
 #include <linux/earlysuspend.h>
 
@@ -63,8 +62,6 @@ static atomic_t m_flag;
 static atomic_t a_flag;
 static atomic_t t_flag;
 static atomic_t mv_flag;
-static atomic_t p_flag;
-static atomic_t l_flag;
 //static int failure_count = 0;
 
 static short akmd_delay = 0;
@@ -399,40 +396,8 @@ static void AKECS_Report_Value(short *rbuf)
 		input_report_abs(data->input_dev, ABS_HAT0Y, rbuf[10]);
 		input_report_abs(data->input_dev, ABS_BRAKE, rbuf[11]);
 	}
-	/* Report proximity information */
-/*	if (atomic_read(&p_flag)) {
-		rbuf[12]=proximity_get_value();
-		input_report_abs(data->input_dev, ABS_DISTANCE, rbuf[12]);
-	#if DEBUG	
-		printk("Proximity = %d\n", rbuf[12]);
-	#endif
-	}*/
-  if(atomic_read(&p_flag)){
-    /* Proximity driver return 0 when something is in front of the sensor */
-    rbuf[12]=is_proxi_open() ? 0 : 1;
-    input_report_abs(data->input_dev, ABS_DISTANCE, rbuf[12]);
-  }
 
-  if(atomic_read(&l_flag)){
-    /* Return the ambient light in LUX
-       Empirical calibration, may not be accurate
-       Add 1 to avoid filtering when the sensor goes to 0 */
-    rbuf[13]=get_lightsensor_light() * 47 + 1;
-    input_report_abs(data->input_dev, ABS_GAS, rbuf[13]);
-  }
-
-  input_sync(data->input_dev);
-}
-
-void report_value_for_prx(int value)
-{
-		
-	struct akm8973_data *data = i2c_get_clientdata(this_client);
-	printk("[AK8973] Proximity = %d\n", value);
-	input_report_abs(data->input_dev, ABS_DISTANCE,value );
 	input_sync(data->input_dev);
-
-
 }
 
 static int AKECS_GetOpenStatus(void)
@@ -462,8 +427,6 @@ static void AKECS_CloseDone(void)
 	atomic_set(&a_flag, 1);
 	atomic_set(&t_flag, 1);
 	atomic_set(&mv_flag, 1);
-	atomic_set(&p_flag, 1);
-	atomic_set(&l_flag, 1);
 }
 
 static int akm_aot_open(struct inode *inode, struct file *file)
@@ -509,13 +472,6 @@ akm_aot_ioctl(struct inode *inode, struct file *file,
 	case ECS_IOCTL_APP_SET_AFLAG:
 	case ECS_IOCTL_APP_SET_TFLAG:
 	case ECS_IOCTL_APP_SET_MVFLAG:
-	case ECS_IOCTL_APP_SET_PFLAG:
-		if (copy_from_user(&flag, argp, sizeof(flag)))
-			return -EFAULT;
-		if (flag < 0 || flag > 1)
-			return -EINVAL;
-		break;
-	case ECS_IOCTL_APP_SET_LFLAG:
 		if (copy_from_user(&flag, argp, sizeof(flag)))
 			return -EFAULT;
 		if (flag < 0 || flag > 1)
@@ -554,18 +510,6 @@ akm_aot_ioctl(struct inode *inode, struct file *file,
 	case ECS_IOCTL_APP_GET_MVFLAG:
 		flag = atomic_read(&mv_flag);
 		break;
-	case ECS_IOCTL_APP_SET_PFLAG:
-		atomic_set(&p_flag, flag);
-		break;
-	case ECS_IOCTL_APP_GET_PFLAG:
-		flag = atomic_read(&p_flag);
-		break;
-	case ECS_IOCTL_APP_SET_LFLAG:
-		atomic_set(&l_flag, flag);
-		break;
-	case ECS_IOCTL_APP_GET_LFLAG:
-		flag = atomic_read(&l_flag);
-		break;
 	case ECS_IOCTL_APP_SET_DELAY:
 		akmd_delay = flag;
 		break;
@@ -581,7 +525,6 @@ akm_aot_ioctl(struct inode *inode, struct file *file,
 	case ECS_IOCTL_APP_GET_AFLAG:
 	case ECS_IOCTL_APP_GET_TFLAG:
 	case ECS_IOCTL_APP_GET_MVFLAG:
-	case ECS_IOCTL_APP_GET_PFLAG:
 	case ECS_IOCTL_APP_GET_DELAY:
 		if (copy_to_user(argp, &flag, sizeof(flag)))
 			return -EFAULT;
@@ -882,8 +825,6 @@ static int akm8973_init_client(struct i2c_client *client)
 	atomic_set(&m_flag, 1);
 	atomic_set(&a_flag, 1);
 	atomic_set(&t_flag, 1);
-	atomic_set(&p_flag, 1);
-	atomic_set(&l_flag, 1);
 	atomic_set(&mv_flag, 1);
 
 	return 0;
@@ -976,8 +917,6 @@ int akm8973_probe(struct i2c_client *client, const struct i2c_device_id * devid)
 	input_set_abs_params(akm->input_dev, ABS_HAT0Y, -2048, 2032, 0, 0);
 	/* z-axis of raw magnetic vector */
 	input_set_abs_params(akm->input_dev, ABS_BRAKE, -2048, 2032, 0, 0);
-	/*proximity vector */
-	input_set_abs_params(akm->input_dev, ABS_DISTANCE, 0, 1, 0, 0);
 	/*light vector */
 	input_set_abs_params(akm->input_dev, ABS_GAS, 0, 12000, 0, 0);
 
